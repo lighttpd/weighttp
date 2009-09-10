@@ -1,0 +1,46 @@
+weighttp - a lightweight and simple webserver benchmarking tool
+-----------------------------------------
+
+Please see http://weighttp.lighttpd.net/ for current info.
+
+
+BUILD
+=====
+
+Make sure you have libev* and python (for waf) installed, then:
+
+$ ./waf configure
+$ ./waf build
+
+See ./waf --help for available configure options and other commands available.
+
+
+INSTALL
+=======
+
+$ ./waf install
+or
+$ sudo ./waf install
+
+
+USAGE
+=====
+
+$ weighttp -h
+
+
+UNINSTALL
+=========
+
+$ ./waf uninstall
+or
+$ sudo ./waf uninstall
+
+
+You can also chain commands:
+
+$ ./waf configure clean build install
+
+----
+
+* libev can be found in your distro's repository or at http://software.schmorp.de/pkg/libev.html

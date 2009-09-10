@@ -1,0 +1,342 @@
+/*
+ * weighttp - a lightweight and simple webserver benchmarking tool
+ *
+ * Author:
+ *     Copyright (c) 2009 Thomas Porzelt
+ *
+ * License:
+ *     MIT, see COPYING file
+ */
+
+#define VERSION "0.1"
+
+#include "weighttp.h"
+
+extern int optind, optopt; /* getopt */
+
+static void show_help(void) {
+	printf("weighttp <options> <url>\n");
+	printf("  -n num   number of requests (mandatory)\n");
+	printf("  -k       keep alive (default: no)\n");
+	printf("  -t num   threadcount (default: 1)\n");
+	printf("  -c num   concurrent clients (default: 1)\n");
+	printf("  -h       show help and exit\n");
+	printf("  -v       show version and exit\n\n");
+}
+
+static struct addrinfo *resolve_host(char *hostname, uint16_t port) {
+	int err;
+	char port_str[6];
+	struct addrinfo hints, *res, *res_first, *res_last;
+
+	memset(&hints, 0, sizeof(hints));
+	hints.ai_family = PF_UNSPEC;
+	hints.ai_socktype = SOCK_STREAM;
+
+	sprintf(port_str, "%d", port);
+
+	err = getaddrinfo(hostname, port_str, &hints, &res_first);
+
+	if (err) {
+		W_ERROR("could not resolve hostname: %s", hostname);
+		return NULL;
+	}
+
+	/* search for an ipv4 address, no ipv6 yet */
+	res_last = NULL;
+	for (res = res_first; res != NULL; res = res->ai_next) {
+		if (res->ai_family == AF_INET)
+			break;
+
+		res_last = res;
+	}
+
+	if (!res) {
+		freeaddrinfo(res_first);
+		W_ERROR("could not resolve hostname: %s", hostname);
+		return NULL;
+	}
+
+	if (res != res_first) {
+		/* unlink from list and free rest */
+		res_last->ai_next = res->ai_next;
+		freeaddrinfo(res_first);
+		res->ai_next = NULL;
+	}
+
+	return res;
+}
+
+static char *forge_request(char *url, char keep_alive, char **host, uint16_t *port) {
+	char *c, *end;
+	char *req;
+	uint32_t len;
+
+	*host = NULL;
+	*port = 0;
+
+	if (strncmp(url, "http://", 7) == 0)
+		url += 7;
+	else if (strncmp(url, "https://", 8) == 0) {
+		W_ERROR("%s", "no ssl support yet");
+		url += 8;
+		return NULL;
+	}
+
+	len = strlen(url);
+
+	if ((c = strchr(url, ':'))) {
+		/* found ':' => host:port */ 
+		*host = W_MALLOC(char, c - url + 1);
+		memcpy(*host, url, c - url);
+		(*host)[c - url] = '\0';
+
+		if ((end = strchr(c+1, '/'))) {
+			*end = '\0';
+			*port = atoi(c+1);
+			*end = '/';
+			url = end;
+		} else {
+			*port = atoi(c+1);
+			url += len;
+		}
+	} else {
+		*port = 80;
+
+		if ((c = strchr(url, '/'))) {
+			*host = W_MALLOC(char, c - url + 1);
+			memcpy(*host, url, c - url);
+			(*host)[c - url] = '\0';
+			url = c;
+		} else {
+			*host = W_MALLOC(char, len + 1);
+			memcpy(*host, url, len);
+			(*host)[len] = '\0';
+			url += len;
+		}
+	}
+
+	if (*port == 0) {
+		W_ERROR("%s", "could not parse url");
+		free(*host);
+		return NULL;
+	}
+
+	if (*url == '\0')
+		url = "/";
+
+	req = W_MALLOC(char, sizeof("GET HTTP/1.1\r\nHost: :65536\r\nConnection: keep-alive\r\n\r\n") + strlen(*host) + strlen(url));
+
+	strcpy(req, "GET ");
+	strcat(req, url);
+	strcat(req, " HTTP/1.1\r\nHost: ");
+	strcat(req, *host);
+	if (*port != 80)
+		sprintf(req + strlen(req), ":%"PRIu16, *port);
+	if (keep_alive)
+		strcat(req, "\r\nConnection: keep-alive\r\n\r\n");
+	else
+		strcat(req, "\r\nConnection: close\r\n\r\n");
+
+	return req;
+}
+
+int main(int argc, char *argv[]) {
+	Worker **workers;
+	pthread_t *threads;
+	int i;
+	char c;
+	int err;
+	struct ev_loop *loop;
+	Config config;
+	Worker *worker;
+	char *host;
+	uint16_t port;
+	uint16_t rest_concur, rest_req;
+	Stats stats;
+	ev_tstamp duration;
+	int sec, millisec, microsec;
+	uint64_t rps;
+	uint64_t kbps;
+
+
+	printf("weighttp - a lightweight and simple webserver benchmarking tool\n\n");
+
+	/* default settings */
+	config.thread_count = 1;
+	config.concur_count = 1;
+	config.req_count = 0;
+	config.keep_alive = 0;
+
+	while ((c = getopt(argc, argv, ":hvkn:t:c:")) != -1) {
+		switch (c) {
+			case 'h':
+				show_help();
+				return 0;
+			case 'v':
+				printf("version:    " VERSION "\n");
+				printf("build-date: " __DATE__ " " __TIME__ "\n\n");
+				return 0;
+			case 'k':
+				config.keep_alive = 1;
+				break;
+			case 'n':
+				config.req_count = atoi(optarg);
+				break;
+			case 't':
+				config.thread_count = atoi(optarg);
+				break;
+			case 'c':
+				config.concur_count = atoi(optarg);
+				break;
+			case '?':
+				W_ERROR("unkown option: -%c", optopt);
+				show_help();
+				return 1;
+		}
+	}
+
+	if ((argc - optind) < 1) {
+		W_ERROR("%s", "missing url argument\n");
+		show_help();
+		return 1;
+	} else if ((argc - optind) > 1) {
+		W_ERROR("%s", "too many arguments\n");
+		show_help();
+		return 1;
+	}
+
+	/* check for sane arguments */
+	if (!config.thread_count) {
+		W_ERROR("%s", "thread count has to be > 0\n");
+		show_help();
+		return 1;
+	}
+	if (!config.concur_count) {
+		W_ERROR("%s", "number of concurrent clients has to be > 0\n");
+		show_help();
+		return 1;
+	}
+	if (!config.req_count) {
+		W_ERROR("%s", "number of requests has to be > 0\n");
+		show_help();
+		return 1;
+	}
+	if (config.thread_count > config.req_count || config.thread_count > config.concur_count || config.concur_count > config.req_count) {
+		W_ERROR("%s", "insane arguments\n");
+		show_help();
+		return 1;
+	}
+
+
+	loop = ev_default_loop(0);
+	if (!loop) {
+		W_ERROR("%s", "could not initialize libev\n");
+		return 2;
+	}
+
+	if (NULL == (config.request = forge_request(argv[optind], config.keep_alive, &host, &port)) {
+		return 1;
+	}
+
+	config.request_size = strlen(config.request);
+	//printf("Request (%d):\n==========\n%s==========\n", config.request_size, config.request);
+	//printf("host: '%s', port: %d\n", host, port);
+
+	/* resolve hostname */
+	if(!(config.saddr = resolve_host(host, port))) {
+		return 1;
+	}
+
+	/* spawn threads */
+	threads = W_MALLOC(pthread_t, config.thread_count);
+	workers = W_MALLOC(Worker*, config.thread_count);
+
+	rest_concur = config.concur_count % config.thread_count;
+	rest_req = config.req_count % config.thread_count;
+
+	printf("starting benchmark...\n");
+
+	memset(&stats, 0, sizeof(stats));
+	stats.ts_start = ev_time();
+
+	for (i = 0; i < config.thread_count; i++) {
+		uint16_t reqs = config.req_count / config.thread_count;
+		uint16_t concur = config.concur_count / config.thread_count;
+		uint16_t diff;
+
+		if (rest_concur) {
+			diff = (i == config.thread_count) ? rest_concur : (rest_concur / config.thread_count);
+			diff = diff ? diff : 1;
+			concur += diff;
+			rest_concur -= diff;
+		}
+
+		if (rest_req) {
+			diff = (i == config.thread_count) ? rest_req : (rest_req / config.thread_count);
+			diff = diff ? diff : 1;
+			reqs += diff;
+			rest_req -= diff;
+		}
+
+		workers[i] = worker = worker_new(i+1, &config, concur, reqs);
+
+		if (!worker) {
+			W_ERROR("%s", "failed to allocate worker or client");
+			return 1;
+		}
+
+		err = pthread_create(&threads[i], NULL, worker_thread, (void*)worker);
+
+		if (err != 0) {
+			W_ERROR("failed spawning thread (%d)", err);
+			return 2;
+		}
+	}
+
+	for (i = 0; i < config.thread_count; i++) {
+		err = pthread_join(threads[i], NULL);
+		worker = workers[i];
+
+		if (err != 0) {
+			W_ERROR("failed joining thread (%d)", err);
+			return 3;
+		}
+
+		stats.req_started += worker->stats.req_started;
+		stats.req_done += worker->stats.req_done;
+		stats.req_success += worker->stats.req_success;
+		stats.req_failed += worker->stats.req_failed;
+		stats.bytes_total += worker->stats.bytes_total;
+		stats.bytes_body += worker->stats.bytes_body;
+
+		worker_free(worker);
+	}
+
+	stats.ts_end = ev_time();
+	duration = stats.ts_end - stats.ts_start;
+	sec = duration;
+	duration -= sec;
+	duration = duration * 1000;
+	millisec = duration;
+	duration -= millisec;
+	microsec = duration * 1000;
+	rps = stats.req_done / (stats.ts_end - stats.ts_start);
+	kbps = stats.bytes_total / (stats.ts_end - stats.ts_start) / 1024;
+	printf("\nfinished in %d sec, %d millisec and %d microsec, %"PRIu64" req/s, %"PRIu64" kbyte/s\n", sec, millisec, microsec, rps, kbps);
+	printf("requests: %"PRIu64" total, %"PRIu64" started, %"PRIu64" done, %"PRIu64" succeeded, %"PRIu64" failed, %"PRIu64" errored\n",
+		config.req_count, stats.req_started, stats.req_done, stats.req_success, stats.req_failed, stats.req_error
+	);
+	printf("traffic: %"PRIu64" bytes total, %"PRIu64" bytes http, %"PRIu64" bytes data\n",
+		stats.bytes_total,  stats.bytes_total - stats.bytes_body, stats.bytes_body
+	);
+
+	ev_default_destroy();
+
+	free(threads);
+	free(workers);
+	free(config.request);
+	freeaddrinfo(config.saddr);
+
+	return 0;
+}

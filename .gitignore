@@ -1,0 +1,6 @@
+.waf-*
+.lock-wscript
+.DS_Store
+*~
+build
+weighttp

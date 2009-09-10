@@ -1,0 +1,6 @@
+- timing statistics
+- generally better statistics
+- chunked encoding support
+- ssl support
+- better error reporting
+- ipv6 support
