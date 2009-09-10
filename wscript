@@ -62,7 +62,7 @@ def build(bld):
 	bld.new_task_gen(
 		features = 'cc cprogram',
 		source = ['src/client.c', 'src/weighttp.c', 'src/worker.c'],
-		defines = ['HAVE_CONFIG_H=1', 'VERSION=' % VERSION],
+		defines = ['HAVE_CONFIG_H=1', 'VERSION="' + VERSION + '"'],
 		includes = '.',
 		uselib = 'ev pthread',
 		target = 'weighttp'
