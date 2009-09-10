@@ -235,7 +235,7 @@ int main(int argc, char *argv[]) {
 		return 2;
 	}
 
-	if (NULL == (config.request = forge_request(argv[optind], config.keep_alive, &host, &port)) {
+	if (NULL == (config.request = forge_request(argv[optind], config.keep_alive, &host, &port))) {
 		return 1;
 	}
 
