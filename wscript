@@ -67,4 +67,3 @@ def build(bld):
 		uselib = 'ev pthread',
 		target = 'weighttp'
 	)
-
