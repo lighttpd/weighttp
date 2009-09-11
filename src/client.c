@@ -219,7 +219,7 @@ void client_state_machine(Client *client) {
 			}
 		case CLIENT_READING:
 			while (1) {
-				r = read(client->sock_watcher.fd, &client->buffer[client->buffer_offset], sizeof(client->buffer) - client->buffer_offset);
+				r = read(client->sock_watcher.fd, &client->buffer[client->buffer_offset], sizeof(client->buffer) - client->buffer_offset - 1);
 				//printf("read(): %d\n", r);
 				if (r == -1) {
 					/* error */
