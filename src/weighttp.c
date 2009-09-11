@@ -139,6 +139,20 @@ static char *forge_request(char *url, char keep_alive, char **host, uint16_t *po
 	return req;
 }
 
+static uint64_t str_to_uint64(char *str) {
+	uint64_t i;
+
+	for (i = 0; *str; str++) {
+		if (*str < '0' || *str > '9')
+			return UINT64_MAX;
+
+		i *= 10;
+		i += *str - '0';
+	}
+
+	return i;
+}
+
 int main(int argc, char *argv[]) {
 	Worker **workers;
 	pthread_t *threads;
@@ -179,7 +193,7 @@ int main(int argc, char *argv[]) {
 				config.keep_alive = 1;
 				break;
 			case 'n':
-				config.req_count = atoi(optarg);
+				config.req_count = str_to_uint64(optarg);
 				break;
 			case 't':
 				config.thread_count = atoi(optarg);
@@ -220,7 +234,7 @@ int main(int argc, char *argv[]) {
 		show_help();
 		return 1;
 	}
-	if (config.thread_count > config.req_count || config.thread_count > config.concur_count || config.concur_count > config.req_count) {
+	if (config.req_count == UINT64_MAX || config.thread_count > config.req_count || config.thread_count > config.concur_count || config.concur_count > config.req_count) {
 		W_ERROR("%s", "insane arguments\n");
 		show_help();
 		return 1;
@@ -259,9 +273,9 @@ int main(int argc, char *argv[]) {
 	stats.ts_start = ev_time();
 
 	for (i = 0; i < config.thread_count; i++) {
-		uint16_t reqs = config.req_count / config.thread_count;
+		uint64_t reqs = config.req_count / config.thread_count;
 		uint16_t concur = config.concur_count / config.thread_count;
-		uint16_t diff;
+		uint64_t diff;
 
 		if (rest_concur) {
 			diff = (i == config.thread_count) ? rest_concur : (rest_concur / config.thread_count);
@@ -276,15 +290,15 @@ int main(int argc, char *argv[]) {
 			reqs += diff;
 			rest_req -= diff;
 		}
+		printf("spawning thread #%d: %"PRIu16" concurrent requests, %"PRIu64" total requests\n", i+1, concur, reqs);
+		workers[i] = worker_new(i+1, &config, concur, reqs);
 
-		workers[i] = worker = worker_new(i+1, &config, concur, reqs);
-
-		if (!worker) {
+		if (!(workers[i])) {
 			W_ERROR("%s", "failed to allocate worker or client");
 			return 1;
 		}
 
-		err = pthread_create(&threads[i], NULL, worker_thread, (void*)worker);
+		err = pthread_create(&threads[i], NULL, worker_thread, (void*)workers[i]);
 
 		if (err != 0) {
 			W_ERROR("failed spawning thread (%d)", err);

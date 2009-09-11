@@ -83,19 +83,18 @@ void client_free(Client *client) {
 static void client_reset(Client *client) {
 	//printf("keep alive: %d\n", client->keepalive);
 	if (!client->keepalive) {
-		ev_io_stop(client->worker->loop, &client->sock_watcher);
-
 		if (client->sock_watcher.fd != -1) {
+			ev_io_stop(client->worker->loop, &client->sock_watcher);
 			shutdown(client->sock_watcher.fd, SHUT_WR);
 			close(client->sock_watcher.fd);
+			client->sock_watcher.fd = -1;
 		}
 
-		client->sock_watcher.fd = -1;
 		client->state = CLIENT_START;
 	} else {
 		client_set_events(client, EV_WRITE);
-		client->worker->stats.req_started++;
 		client->state = CLIENT_WRITING;
+		client->worker->stats.req_started++;
 	}
 
 	client->parser_state = PARSER_START;
@@ -158,12 +157,16 @@ void client_state_machine(Client *client) {
 	//printf("state: %d\n", client->state);
 	switch (client->state) {
 		case CLIENT_START:
+			client->worker->stats.req_started++;
+
 			do {
 				r = socket(config->saddr->ai_family, config->saddr->ai_socktype, config->saddr->ai_protocol);
 			} while (-1 == r && errno == EINTR);
 
 			if (-1 == r) {
 				client->state = CLIENT_ERROR;
+				strerror_r(errno, client->buffer, sizeof(client->buffer));
+				W_ERROR("socket() failed: %s (%d)", client->buffer, errno);
 				goto start;
 			}
 
@@ -173,8 +176,6 @@ void client_state_machine(Client *client) {
 			ev_init(&client->sock_watcher, client_io_cb);
 			ev_io_set(&client->sock_watcher, r, EV_WRITE);
 			ev_io_start(client->worker->loop, &client->sock_watcher);
-
-			client->worker->stats.req_started++;
 
 			if (!client_connect(client)) {
 				client->state = CLIENT_ERROR;
@@ -257,7 +258,6 @@ void client_state_machine(Client *client) {
 				}
 			}
 
-			break;
 		case CLIENT_ERROR:
 			//printf("client error\n");
 			client->worker->stats.req_error++;
@@ -275,9 +275,15 @@ void client_state_machine(Client *client) {
 				client->worker->stats.req_failed++;
 			}
 
+			/*if (client->worker->id == 1 && (client->worker->stats.req_started % 10) == 0)
+				printf("thread: %d, requests done: %"PRIu64", %"PRIu64" todo, %"PRIu64" started\n",
+					client->worker->id, client->worker->stats.req_done, client->worker->stats.req_todo,
+					client->worker->stats.req_started);*/
+
 			if (client->worker->stats.req_started == client->worker->stats.req_todo) {
 				/* this worker has started all requests */
-				ev_io_stop(client->worker->loop, &client->sock_watcher);
+				client->keepalive = 0;
+				client_reset(client);
 
 				if (client->worker->stats.req_done == client->worker->stats.req_todo) {
 					/* this worker has finished all requests */
