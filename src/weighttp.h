@@ -57,4 +57,6 @@ struct Config {
 	struct addrinfo *saddr;
 };
 
+uint64_t str_to_uint64(char *str);
+
 #endif

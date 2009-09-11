@@ -139,7 +139,7 @@ static char *forge_request(char *url, char keep_alive, char **host, uint16_t *po
 	return req;
 }
 
-static uint64_t str_to_uint64(char *str) {
+uint64_t str_to_uint64(char *str) {
 	uint64_t i;
 
 	for (i = 0; *str; str++) {

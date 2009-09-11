@@ -249,7 +249,7 @@ void client_state_machine(Client *client) {
 						if (client->state == CLIENT_END)
 							goto start;
 						else
-							break;
+							return;
 					}
 				} else {
 					/* disconnect */
@@ -343,7 +343,7 @@ static uint8_t client_parse(Client *client) {
 
 				if (strncmp(str, "Content-Length: ", sizeof("Content-Length: ")-1) == 0) {
 					/* content length header */
-					client->content_length = atoi(str + sizeof("Content-Length: ") - 1);
+					client->content_length = str_to_uint64(str + sizeof("Content-Length: ") - 1);
 				} else if (strncmp(str, "Connection: ", sizeof("Connection: ")-1) == 0) {
 					/* connection header */
 					str += sizeof("Connection: ") - 1;
@@ -375,8 +375,8 @@ static uint8_t client_parse(Client *client) {
 			//printf("parse (BODY)\n");
 			/* do nothing, just consume the data */
 			/*printf("content-l: %"PRIu64", header: %d, recevied: %"PRIu64"\n",
-			client->content_length, client->header_size, client->bytes_received);
-			client->buffer_offset = 0;*/
+			client->content_length, client->header_size, client->bytes_received);*/
+			client->buffer_offset = 0;
 
 			if (client->content_length == -1)
 				return 0;
