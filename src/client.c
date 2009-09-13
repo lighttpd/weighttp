@@ -275,10 +275,12 @@ void client_state_machine(Client *client) {
 				client->worker->stats.req_failed++;
 			}
 
-			/*if (client->worker->id == 1 && (client->worker->stats.req_started % 10) == 0)
-				printf("thread: %d, requests done: %"PRIu64", %"PRIu64" todo, %"PRIu64" started\n",
-					client->worker->id, client->worker->stats.req_done, client->worker->stats.req_todo,
-					client->worker->stats.req_started);*/
+			/* print progress every 10% done */
+			if (client->worker->id == 1 && client->worker->stats.req_done % client->worker->progress_interval == 0) {
+				printf("progress: %3d%% done\n",
+					(int) (client->worker->stats.req_done * 100 / client->worker->stats.req_todo)
+				);
+			}
 
 			if (client->worker->stats.req_started == client->worker->stats.req_todo) {
 				/* this worker has started all requests */

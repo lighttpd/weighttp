@@ -9,8 +9,6 @@
  */
 
 struct Stats {
-	ev_tstamp ts_start;		/* start of requests */
-	ev_tstamp ts_end;		/* end of requests */
 	ev_tstamp req_ts_min;	/* minimum time taken for a request */
 	ev_tstamp req_ts_max;	/* maximum time taken for a request */
 	ev_tstamp req_ts_total;	/* total time taken for all requests (this is not ts_end - ts_start!) */
@@ -32,6 +30,7 @@ struct Worker {
 	Client **clients;
 	uint16_t num_clients;
 	Stats stats;
+	uint64_t progress_interval;
 };
 
 

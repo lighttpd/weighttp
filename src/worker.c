@@ -21,6 +21,11 @@ Worker *worker_new(uint8_t id, Config *config, uint16_t num_clients, uint64_t nu
 	worker->config = config;
 	worker->num_clients = num_clients;
 	worker->stats.req_todo = num_requests;
+	worker->progress_interval = num_requests / 10;
+
+	if (worker->progress_interval == 0)
+		worker->progress_interval = 1;
+
 	worker->clients = W_MALLOC(Client*, num_clients);
 
 	for (i = 0; i < num_clients; i++) {

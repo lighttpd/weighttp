@@ -160,6 +160,7 @@ int main(int argc, char *argv[]) {
 	char c;
 	int err;
 	struct ev_loop *loop;
+	ev_tstamp ts_start, ts_end;
 	Config config;
 	Worker *worker;
 	char *host;
@@ -270,7 +271,7 @@ int main(int argc, char *argv[]) {
 	printf("starting benchmark...\n");
 
 	memset(&stats, 0, sizeof(stats));
-	stats.ts_start = ev_time();
+	ts_start = ev_time();
 
 	for (i = 0; i < config.thread_count; i++) {
 		uint64_t reqs = config.req_count / config.thread_count;
@@ -325,16 +326,16 @@ int main(int argc, char *argv[]) {
 		worker_free(worker);
 	}
 
-	stats.ts_end = ev_time();
-	duration = stats.ts_end - stats.ts_start;
+	ts_end = ev_time();
+	duration = ts_end - ts_start;
 	sec = duration;
 	duration -= sec;
 	duration = duration * 1000;
 	millisec = duration;
 	duration -= millisec;
 	microsec = duration * 1000;
-	rps = stats.req_done / (stats.ts_end - stats.ts_start);
-	kbps = stats.bytes_total / (stats.ts_end - stats.ts_start) / 1024;
+	rps = stats.req_done / (ts_end - ts_start);
+	kbps = stats.bytes_total / (ts_end - ts_start) / 1024;
 	printf("\nfinished in %d sec, %d millisec and %d microsec, %"PRIu64" req/s, %"PRIu64" kbyte/s\n", sec, millisec, microsec, rps, kbps);
 	printf("requests: %"PRIu64" total, %"PRIu64" started, %"PRIu64" done, %"PRIu64" succeeded, %"PRIu64" failed, %"PRIu64" errored\n",
 		config.req_count, stats.req_started, stats.req_done, stats.req_success, stats.req_failed, stats.req_error
