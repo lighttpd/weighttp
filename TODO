@@ -3,5 +3,4 @@
 - chunked encoding support
 - ssl support
 - better error reporting
-- ipv6 support
 - pipelining

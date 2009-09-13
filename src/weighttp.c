@@ -14,15 +14,16 @@ extern int optind, optopt; /* getopt */
 
 static void show_help(void) {
 	printf("weighttp <options> <url>\n");
-	printf("  -n num   number of requests (mandatory)\n");
-	printf("  -k       keep alive (default: no)\n");
-	printf("  -t num   threadcount (default: 1)\n");
-	printf("  -c num   concurrent clients (default: 1)\n");
+	printf("  -n num   number of requests    (mandatory)\n");
+	printf("  -t num   threadcount           (default: 1)\n");
+	printf("  -c num   concurrent clients    (default: 1)\n");
+	printf("  -k       keep alive            (default: no)\n");
+	printf("  -6       use ipv6              (default: no)\n");
 	printf("  -h       show help and exit\n");
 	printf("  -v       show version and exit\n\n");
 }
 
-static struct addrinfo *resolve_host(char *hostname, uint16_t port) {
+static struct addrinfo *resolve_host(char *hostname, uint16_t port, uint8_t use_ipv6) {
 	int err;
 	char port_str[6];
 	struct addrinfo hints, *res, *res_first, *res_last;
@@ -43,7 +44,9 @@ static struct addrinfo *resolve_host(char *hostname, uint16_t port) {
 	/* search for an ipv4 address, no ipv6 yet */
 	res_last = NULL;
 	for (res = res_first; res != NULL; res = res->ai_next) {
-		if (res->ai_family == AF_INET)
+		if (res->ai_family == AF_INET && !use_ipv6)
+			break;
+		else if (res->ai_family == AF_INET6 && use_ipv6)
 			break;
 
 		res_last = res;
@@ -165,6 +168,7 @@ int main(int argc, char *argv[]) {
 	Worker *worker;
 	char *host;
 	uint16_t port;
+	uint8_t use_ipv6;
 	uint16_t rest_concur, rest_req;
 	Stats stats;
 	ev_tstamp duration;
@@ -176,12 +180,13 @@ int main(int argc, char *argv[]) {
 	printf("weighttp - a lightweight and simple webserver benchmarking tool\n\n");
 
 	/* default settings */
+	use_ipv6 = 0;
 	config.thread_count = 1;
 	config.concur_count = 1;
 	config.req_count = 0;
 	config.keep_alive = 0;
 
-	while ((c = getopt(argc, argv, ":hvkn:t:c:")) != -1) {
+	while ((c = getopt(argc, argv, ":hv6kn:t:c:")) != -1) {
 		switch (c) {
 			case 'h':
 				show_help();
@@ -190,6 +195,9 @@ int main(int argc, char *argv[]) {
 				printf("version:    " VERSION "\n");
 				printf("build-date: " __DATE__ " " __TIME__ "\n\n");
 				return 0;
+			case '6':
+				use_ipv6 = 1;
+				break;
 			case 'k':
 				config.keep_alive = 1;
 				break;
@@ -257,7 +265,7 @@ int main(int argc, char *argv[]) {
 	//printf("host: '%s', port: %d\n", host, port);
 
 	/* resolve hostname */
-	if(!(config.saddr = resolve_host(host, port))) {
+	if(!(config.saddr = resolve_host(host, port, use_ipv6))) {
 		return 1;
 	}
 
