@@ -349,6 +349,7 @@ int main(int argc, char *argv[]) {
 	free(threads);
 	free(workers);
 	free(config.request);
+	free(host);
 	freeaddrinfo(config.saddr);
 
 	return 0;
