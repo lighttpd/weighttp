@@ -1,6 +1,7 @@
+- handle responses without content-length but connection: close
 - timing statistics
 - generally better statistics
-- chunked encoding support
 - ssl support
 - better error reporting
 - pipelining
+- fuzzer

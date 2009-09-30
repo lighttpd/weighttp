@@ -10,7 +10,7 @@
 
 #include "weighttp.h"
 
-static uint8_t client_parse(Client *client);
+static uint8_t client_parse(Client *client, int size);
 static void client_io_cb(struct ev_loop *loop, ev_io *w, int revents);
 static void client_set_events(Client *client, int events);
 /*
@@ -66,6 +66,9 @@ Client *client_new(Worker *worker) {
 	client->buffer_offset = 0;
 	client->request_offset = 0;
 	client->keepalive = client->worker->config->keep_alive;
+	client->chunked = 0;
+	client->chunk_size = -1;
+	client->chunk_received = 0;
 
 	return client;
 }
@@ -109,6 +112,9 @@ static void client_reset(Client *client) {
 	client->bytes_received = 0;
 	client->header_size = 0;
 	client->keepalive = client->worker->config->keep_alive;
+	client->chunked = 0;
+	client->chunk_size = -1;
+	client->chunk_received = 0;
 }
 
 static uint8_t client_connect(Client *client) {
@@ -220,7 +226,7 @@ void client_state_machine(Client *client) {
 		case CLIENT_READING:
 			while (1) {
 				r = read(client->sock_watcher.fd, &client->buffer[client->buffer_offset], sizeof(client->buffer) - client->buffer_offset - 1);
-				//printf("read(): %d\n", r);
+				//printf("read(): %d, offset was: %d\n", r, client->buffer_offset);
 				if (r == -1) {
 					/* error */
 					if (errno == EINTR)
@@ -241,7 +247,7 @@ void client_state_machine(Client *client) {
 					}
 					client->buffer[client->buffer_offset] = '\0';
 					//printf("buffer:\n==========\n%s\n==========\n", client->buffer);
-					if (!client_parse(client)) {
+					if (!client_parse(client, r)) {
 						client->state = CLIENT_ERROR;
 						//printf("parser failed\n");
 						break;
@@ -299,7 +305,7 @@ void client_state_machine(Client *client) {
 }
 
 
-static uint8_t client_parse(Client *client) {
+static uint8_t client_parse(Client *client, int size) {
 	char *end, *str;
 
 	switch (client->parser_state) {
@@ -336,7 +342,7 @@ static uint8_t client_parse(Client *client) {
 					client->header_size = end + 2 - client->buffer;
 					//printf("body reached\n");
 
-					return client_parse(client);
+					return client_parse(client, size - client->header_size);
 				}
 
 				*end = '\0';
@@ -358,15 +364,25 @@ static uint8_t client_parse(Client *client) {
 						client->keepalive = client->worker->config->keep_alive;
 					else
 						return 0;
+				} else if (strncmp(str, "Transfer-Encoding: ", sizeof("Transfer-Encoding: ")-1) == 0) {
+					/* transfer encoding header */
+					str += sizeof("Transfer-Encoding: ") - 1;
+
+					if (strncmp(str, "chunked", sizeof("chunked")-1) == 0)
+						client->chunked = 1;
+					else
+						return 0;
 				}
+
 
 				if (*(end+2) == '\r' && *(end+3) == '\n') {
 					/* body reached */
 					client->parser_state = PARSER_BODY;
 					client->header_size = end + 4 - client->buffer;
+					client->parser_offset = client->header_size;
 					//printf("body reached\n");
 
-					return client_parse(client);
+					return client_parse(client, size - client->header_size);
 				}
 
 				client->parser_offset = end - client->buffer + 2;
@@ -378,15 +394,97 @@ static uint8_t client_parse(Client *client) {
 			/* do nothing, just consume the data */
 			/*printf("content-l: %"PRIu64", header: %d, recevied: %"PRIu64"\n",
 			client->content_length, client->header_size, client->bytes_received);*/
-			client->buffer_offset = 0;
 
-			if (client->content_length == -1)
-				return 0;
+			if (client->chunked) {
+				int consume_max;
 
-			if (client->bytes_received == (uint64_t) (client->header_size + client->content_length)) {
-				/* full response received */
-				client->state = CLIENT_END;
-				client->success = client->status_200 ? 1 : 0;
+				str = &client->buffer[client->parser_offset];
+				/*printf("parsing chunk: '%s'\n(%"PRIi64" received, %"PRIi64" size, %d parser offset)\n",
+					str, client->chunk_received, client->chunk_size, client->parser_offset
+				);*/
+
+				if (client->chunk_size == -1) {
+					/* read chunk size */
+					client->chunk_size = 0;
+					client->chunk_received = 0;
+					end = str + size;
+
+					for (; str < end; str++) {
+						if (*str == ';' || *str == '\r')
+							break;
+
+						client->chunk_size *= 16;
+						if (*str >= '0' && *str <= '9')
+							client->chunk_size += *str - '0';
+						else if (*str >= 'A' && *str <= 'Z')
+							client->chunk_size += 10 + *str - 'A';
+						else if (*str >= 'a' && *str <= 'z')
+							client->chunk_size += 10 + *str - 'a';
+						else
+							return 0;
+					}
+
+					str = strstr(str, "\r\n");
+					if (!str)
+						return 0;
+					str += 2;
+
+					//printf("---------- chunk size: %"PRIi64", %d read, %d offset, data: '%s'\n", client->chunk_size, size, client->parser_offset, str);
+
+					if (client->chunk_size == 0) {
+						/* chunk of size 0 marks end of content body */
+						client->state = CLIENT_END;
+						client->success = client->status_200 ? 1 : 0;
+						return 1;
+					}
+
+					size -= str - &client->buffer[client->parser_offset];
+					client->parser_offset = str - client->buffer;
+				}
+
+				/* consume chunk till chunk_size is reached */
+				consume_max = client->chunk_size - client->chunk_received;
+
+				if (size < consume_max)
+					consume_max = size;
+
+				client->chunk_received += consume_max;
+				client->parser_offset += consume_max;
+
+				//printf("---------- chunk consuming: %d, received: %"PRIi64" of %"PRIi64", offset: %d\n", consume_max, client->chunk_received, client->chunk_size, client->parser_offset);
+
+				if (client->chunk_received == client->chunk_size) {
+					if (client->buffer[client->parser_offset] != '\r' || client->buffer[client->parser_offset+1] != '\n')
+						return 0;
+
+					/* got whole chunk, next! */
+					//printf("---------- got whole chunk!!\n");
+					client->chunk_size = -1;
+					client->chunk_received = 0;
+					client->parser_offset += 2;
+					consume_max += 2;
+
+					/* there is stuff left to parse */
+					if (size - consume_max > 0)
+						return client_parse(client, size - consume_max);
+				}
+
+				client->parser_offset = 0;
+				client->buffer_offset = 0;
+
+				return 1;
+			} else {
+				/* not chunked, just consume all data till content-length is reached */
+				client->buffer_offset = 0;
+
+				if (client->content_length == -1)
+					return 0;
+
+				if (client->bytes_received == (uint64_t) (client->header_size + client->content_length)) {
+					/* full response received */
+					client->state = CLIENT_END;
+					client->success = client->status_200 ? 1 : 0;
+				}
 			}
 
 			return 1;

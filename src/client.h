@@ -34,6 +34,9 @@ struct Client {
 	uint8_t keepalive;
 	uint8_t success;
 	uint8_t status_200;
+	uint8_t chunked;
+	int64_t chunk_size;
+	int64_t chunk_received;
 	int64_t content_length;
 	uint64_t bytes_received; /* including http header */
 	uint16_t header_size;
