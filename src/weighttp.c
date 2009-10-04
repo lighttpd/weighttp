@@ -126,7 +126,7 @@ static char *forge_request(char *url, char keep_alive, char **host, uint16_t *po
 	if (*url == '\0')
 		url = "/";
 
-	req = W_MALLOC(char, sizeof("GET HTTP/1.1\r\nHost: :65536\r\nConnection: keep-alive\r\n\r\n") + strlen(*host) + strlen(url));
+	req = W_MALLOC(char, sizeof("GET HTTP/1.1\r\nHost: :65536\r\nUser-Agent: weighttp/\r\nConnection: keep-alive\r\n\r\n") + strlen(VERSION) + strlen(*host) + strlen(url));
 
 	strcpy(req, "GET ");
 	strcat(req, url);
@@ -134,10 +134,13 @@ static char *forge_request(char *url, char keep_alive, char **host, uint16_t *po
 	strcat(req, *host);
 	if (*port != 80)
 		sprintf(req + strlen(req), ":%"PRIu16, *port);
+
+	sprintf(req + strlen(req), "\r\nUser-Agent: weighttp/" VERSION "\r\n");
+
 	if (keep_alive)
-		strcat(req, "\r\nConnection: keep-alive\r\n\r\n");
+		strcat(req, "Connection: keep-alive\r\n\r\n");
 	else
-		strcat(req, "\r\nConnection: close\r\n\r\n");
+		strcat(req, "Connection: close\r\n\r\n");
 
 	return req;
 }
