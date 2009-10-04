@@ -1,4 +1,3 @@
-- handle responses without content-length but connection: close
 - timing statistics
 - generally better statistics
 - ssl support

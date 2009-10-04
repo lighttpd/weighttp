@@ -259,8 +259,15 @@ void client_state_machine(Client *client) {
 					}
 				} else {
 					/* disconnect */
-					client->state = CLIENT_ERROR;
-					break;
+					if (client->parser_state == PARSER_BODY && !client->keepalive && client->status_200
+						&& !client->chunked && client->content_length == -1) {
+						client->success = 1;
+						client->state = CLIENT_END;
+					} else {
+						client->state = CLIENT_ERROR;
+					}
+
+					goto start;
 				}
 			}
 
