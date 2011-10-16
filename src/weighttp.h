@@ -30,6 +30,7 @@
 #define CLIENT_BUFFER_SIZE 32 * 1024
 
 #define W_MALLOC(t, n) ((t*) calloc((n), sizeof(t)))
+#define W_REALLOC(p, t, n) ((t*) realloc(p, (n) * sizeof(t)))
 #define W_ERROR(f, ...) fprintf(stderr, "error: " f "\n", __VA_ARGS__)
 #define UNUSED(x) ( (void)(x) )
 

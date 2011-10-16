@@ -19,8 +19,10 @@ static void show_help(void) {
 	printf("  -c num   concurrent clients    (default: 1)\n");
 	printf("  -k       keep alive            (default: no)\n");
 	printf("  -6       use ipv6              (default: no)\n");
+	printf("  -H str   add header to request\n");
 	printf("  -h       show help and exit\n");
 	printf("  -v       show version and exit\n\n");
+	printf("example: weighttpd -n 10000 -c 10 -t 2 -k -H \"User-Agent: foo\" localhost/index.html\n\n");
 }
 
 static struct addrinfo *resolve_host(char *hostname, uint16_t port, uint8_t use_ipv6) {
@@ -68,10 +70,12 @@ static struct addrinfo *resolve_host(char *hostname, uint16_t port, uint8_t use_
 	return res;
 }
 
-static char *forge_request(char *url, char keep_alive, char **host, uint16_t *port) {
+static char *forge_request(char *url, char keep_alive, char **host, uint16_t *port, char **headers, uint8_t headers_num) {
 	char *c, *end;
 	char *req;
 	uint32_t len;
+	uint8_t i;
+	uint8_t have_user_agent;
 
 	*host = NULL;
 	*port = 0;
@@ -126,7 +130,22 @@ static char *forge_request(char *url, char keep_alive, char **host, uint16_t *po
 	if (*url == '\0')
 		url = "/";
 
-	req = W_MALLOC(char, sizeof("GET HTTP/1.1\r\nHost: :65536\r\nUser-Agent: weighttp/\r\nConnection: keep-alive\r\n\r\n") + strlen(VERSION) + strlen(*host) + strlen(url));
+	// total request size
+	len = strlen("GET HTTP/1.1\r\nHost: :65536\r\nConnection: keep-alive\r\n\r\n") + 1;
+	len += strlen(*host);
+	len += strlen(url);
+
+	have_user_agent = 0;
+	for (i = 0; i < headers_num; i++) {
+		len += strlen(headers[i]) + strlen("\r\n");
+		if (strncmp(headers[i], "User-Agent: ", sizeof("User-Agent: ")-1) == 0)
+			have_user_agent = 1;
+	}
+
+	if (!have_user_agent)
+		len += strlen("User-Agent: weighttp/" VERSION "\r\n");
+
+	req = W_MALLOC(char, len);
 
 	strcpy(req, "GET ");
 	strcat(req, url);
@@ -135,7 +154,15 @@ static char *forge_request(char *url, char keep_alive, char **host, uint16_t *po
 	if (*port != 80)
 		sprintf(req + strlen(req), ":%"PRIu16, *port);
 
-	sprintf(req + strlen(req), "\r\nUser-Agent: weighttp/" VERSION "\r\n");
+	strcat(req, "\r\n");
+
+	if (!have_user_agent)
+		sprintf(req + strlen(req), "User-Agent: weighttp/" VERSION "\r\n");
+
+	for (i = 0; i < headers_num; i++) {
+		strcat(req, headers[i]);
+		strcat(req, "\r\n");
+	}
 
 	if (keep_alive)
 		strcat(req, "Connection: keep-alive\r\n\r\n");
@@ -178,9 +205,13 @@ int main(int argc, char *argv[]) {
 	int sec, millisec, microsec;
 	uint64_t rps;
 	uint64_t kbps;
-
+	char **headers;
+	uint8_t headers_num;
 
 	printf("weighttp - a lightweight and simple webserver benchmarking tool\n\n");
+
+	headers = NULL;
+	headers_num = 0;
 
 	/* default settings */
 	use_ipv6 = 0;
@@ -189,7 +220,7 @@ int main(int argc, char *argv[]) {
 	config.req_count = 0;
 	config.keep_alive = 0;
 
-	while ((c = getopt(argc, argv, ":hv6kn:t:c:")) != -1) {
+	while ((c = getopt(argc, argv, ":hv6kn:t:c:H:")) != -1) {
 		switch (c) {
 			case 'h':
 				show_help();
@@ -212,6 +243,11 @@ int main(int argc, char *argv[]) {
 				break;
 			case 'c':
 				config.concur_count = atoi(optarg);
+				break;
+			case 'H':
+				headers = W_REALLOC(headers, char*, headers_num+1);
+				headers[headers_num] = optarg;
+				headers_num++;
 				break;
 			case '?':
 				W_ERROR("unkown option: -%c", optopt);
@@ -259,7 +295,7 @@ int main(int argc, char *argv[]) {
 		return 2;
 	}
 
-	if (NULL == (config.request = forge_request(argv[optind], config.keep_alive, &host, &port))) {
+	if (NULL == (config.request = forge_request(argv[optind], config.keep_alive, &host, &port, headers, headers_num))) {
 		return 1;
 	}
 
@@ -361,6 +397,7 @@ int main(int argc, char *argv[]) {
 	free(workers);
 	free(config.request);
 	free(host);
+	free(headers);
 	freeaddrinfo(config.saddr);
 
 	return 0;
