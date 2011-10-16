@@ -52,7 +52,8 @@ void *worker_thread(void* arg) {
 
 	/* start all clients */
 	for (i = 0; i < worker->num_clients; i++) {
-		client_state_machine(worker->clients[i]);
+		if (worker->stats.req_started < worker->stats.req_todo)
+			client_state_machine(worker->clients[i]);
 	}
 
 	ev_loop(worker->loop, 0);

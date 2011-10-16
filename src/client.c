@@ -106,7 +106,7 @@ static void client_reset(Client *client) {
 	client->request_offset = 0;
 	client->ts_start = 0;
 	client->ts_end = 0;
-	client->status_200 = 0;
+	client->status_success = 0;
 	client->success = 0;
 	client->content_length = -1;
 	client->bytes_received = 0;
@@ -259,7 +259,7 @@ void client_state_machine(Client *client) {
 					}
 				} else {
 					/* disconnect */
-					if (client->parser_state == PARSER_BODY && !client->keepalive && client->status_200
+					if (client->parser_state == PARSER_BODY && !client->keepalive && client->status_success
 						&& !client->chunked && client->content_length == -1) {
 						client->success = 1;
 						client->state = CLIENT_END;
@@ -314,27 +314,50 @@ void client_state_machine(Client *client) {
 
 static uint8_t client_parse(Client *client, int size) {
 	char *end, *str;
+	uint16_t status_code;
 
 	switch (client->parser_state) {
 		case PARSER_START:
 			//printf("parse (START):\n%s\n", &client->buffer[client->parser_offset]);
 			/* look for HTTP/1.1 200 OK */
-			if (client->buffer_offset < sizeof("HTTP/1.1 200 OK\r\n"))
+			if (client->buffer_offset < sizeof("HTTP/1.1 200\r\n"))
 				return 1;
 
-			if (strncmp(client->buffer, "HTTP/1.1 200 OK\r\n", sizeof("HTTP/1.1 200 OK\r\n")-1) == 0) {
-				client->status_200 = 1;
-				client->parser_offset = sizeof("HTTP/1.1 200 ok\r\n") - 1;
-			} else {
-				client->status_200 = 0;
-				end = strchr(client->buffer, '\r');
+			if (strncmp(client->buffer, "HTTP/1.1 ", sizeof("HTTP/1.1 ")-1) != 0)
+				return 0;
 
-				if (!end || *(end+1) != '\n')
+			// now the status code
+			status_code = 0;
+			str = client->buffer + sizeof("HTTP/1.1 ")-1;
+			for (end = str + 3; str != end; str++) {
+				if (*str < '0' || *str > '9')
 					return 0;
 
-				client->parser_offset = end + 2 - client->buffer;
+				status_code *= 10;
+				status_code += *str - '0';
 			}
 
+			if (status_code >= 200 && status_code < 300) {
+				client->worker->stats.req_2xx++;
+				client->status_success = 1;
+			} else if (status_code < 400) {
+				client->worker->stats.req_3xx++;
+				client->status_success = 1;
+			} else if (status_code < 500) {
+				client->worker->stats.req_4xx++;
+			} else if (status_code < 600) {
+				client->worker->stats.req_5xx++;
+			} else {
+				// invalid status code
+				return 0;
+			}
+
+			// look for next \r\n
+			end = strchr(end, '\r');
+			if (!end || *(end+1) != '\n')
+				return 0;
+
+			client->parser_offset = end + 2 - client->buffer;
 			client->parser_state = PARSER_HEADER;
 		case PARSER_HEADER:
 			//printf("parse (HEADER)\n");
@@ -441,7 +464,7 @@ static uint8_t client_parse(Client *client, int size) {
 					if (client->chunk_size == 0) {
 						/* chunk of size 0 marks end of content body */
 						client->state = CLIENT_END;
-						client->success = client->status_200 ? 1 : 0;
+						client->success = client->status_success ? 1 : 0;
 						return 1;
 					}
 
@@ -490,7 +513,7 @@ static uint8_t client_parse(Client *client, int size) {
 				if (client->bytes_received == (uint64_t) (client->header_size + client->content_length)) {
 					/* full response received */
 					client->state = CLIENT_END;
-					client->success = client->status_200 ? 1 : 0;
+					client->success = client->status_success ? 1 : 0;
 				}
 			}
 

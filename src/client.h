@@ -33,7 +33,7 @@ struct Client {
 	ev_tstamp ts_end;
 	uint8_t keepalive;
 	uint8_t success;
-	uint8_t status_200;
+	uint8_t status_success;
 	uint8_t chunked;
 	int64_t chunk_size;
 	int64_t chunk_received;

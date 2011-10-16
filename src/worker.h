@@ -20,6 +20,11 @@ struct Stats {
 	uint64_t req_error;		/* total number of error'd requests */
 	uint64_t bytes_total;	/* total number of bytes received (html+body) */
 	uint64_t bytes_body;	/* total number of bytes received (body) */
+	uint64_t req_1xx;
+	uint64_t req_2xx;
+	uint64_t req_3xx;
+	uint64_t req_4xx;
+	uint64_t req_5xx;
 };
 
 struct Worker {

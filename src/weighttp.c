@@ -369,6 +369,10 @@ int main(int argc, char *argv[]) {
 		stats.req_failed += worker->stats.req_failed;
 		stats.bytes_total += worker->stats.bytes_total;
 		stats.bytes_body += worker->stats.bytes_body;
+		stats.req_2xx += worker->stats.req_2xx;
+		stats.req_3xx += worker->stats.req_3xx;
+		stats.req_4xx += worker->stats.req_4xx;
+		stats.req_5xx += worker->stats.req_5xx;
 
 		worker_free(worker);
 	}
@@ -386,6 +390,9 @@ int main(int argc, char *argv[]) {
 	printf("\nfinished in %d sec, %d millisec and %d microsec, %"PRIu64" req/s, %"PRIu64" kbyte/s\n", sec, millisec, microsec, rps, kbps);
 	printf("requests: %"PRIu64" total, %"PRIu64" started, %"PRIu64" done, %"PRIu64" succeeded, %"PRIu64" failed, %"PRIu64" errored\n",
 		config.req_count, stats.req_started, stats.req_done, stats.req_success, stats.req_failed, stats.req_error
+	);
+	printf("status codes: %"PRIu64" 2xx, %"PRIu64" 3xx, %"PRIu64" 4xx, %"PRIu64" 5xx\n",
+		stats.req_2xx, stats.req_3xx, stats.req_4xx, stats.req_5xx
 	);
 	printf("traffic: %"PRIu64" bytes total, %"PRIu64" bytes http, %"PRIu64" bytes data\n",
 		stats.bytes_total,  stats.bytes_total - stats.bytes_body, stats.bytes_body
