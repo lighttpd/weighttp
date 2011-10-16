@@ -2,7 +2,7 @@
  * weighttp - a lightweight and simple webserver benchmarking tool
  *
  * Author:
- *     Copyright (c) 2009 Thomas Porzelt
+ *     Copyright (c) 2009-2011 Thomas Porzelt
  *
  * License:
  *     MIT, see COPYING file

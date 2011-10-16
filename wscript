@@ -5,7 +5,7 @@
  * weighttp - a lightweight and simple webserver benchmarking tool
  *
  * Author:
- *     Copyright (c) 2009 Thomas Porzelt
+ *     Copyright (c) 2009-2011 Thomas Porzelt
  *
  * License:
  *     MIT, see COPYING file
@@ -14,7 +14,7 @@
 import Options
 
 # the following two variables are used by the target "waf dist"
-VERSION='0.2'
+VERSION='0.3'
 APPNAME='weighttp'
 
 # these variables are mandatory ('/' are converted automatically)
