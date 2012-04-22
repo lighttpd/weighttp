@@ -29,8 +29,11 @@ struct Client {
 	uint32_t buffer_offset;
 	uint32_t parser_offset;
 	uint32_t request_offset;
-	ev_tstamp ts_start;
-	ev_tstamp ts_end;
+	ev_tstamp ts_start; /* Start of connection */
+	ev_tstamp ts_connect; /* Connected, start writing */
+	ev_tstamp ts_endwrite; /* Request written */
+	ev_tstamp ts_beginread; /* First byte of input */
+	ev_tstamp ts_end; /* Connection closed */
 	uint8_t keepalive;
 	uint8_t success;
 	uint8_t status_success;
