@@ -379,26 +379,24 @@ static uint8_t client_parse(Client *client, int size) {
 				str = &client->buffer[client->parser_offset];
 				//printf("checking header: '%s'\n", str);
 
-				if (strncmp(str, "Content-Length: ", sizeof("Content-Length: ")-1) == 0) {
+				if (strncasecmp(str, "Content-Length: ", sizeof("Content-Length: ")-1) == 0) {
 					/* content length header */
 					client->content_length = str_to_uint64(str + sizeof("Content-Length: ") - 1);
-				} else if (strncmp(str, "Connection: ", sizeof("Connection: ")-1) == 0) {
+				} else if (strncasecmp(str, "Connection: ", sizeof("Connection: ")-1) == 0) {
 					/* connection header */
 					str += sizeof("Connection: ") - 1;
 
-					if (strncmp(str, "close", sizeof("close")-1) == 0)
+					if (strncasecmp(str, "close", sizeof("close")-1) == 0)
 						client->keepalive = 0;
-					else if (strncmp(str, "Keep-Alive", sizeof("Keep-Alive")-1) == 0)
-						client->keepalive = client->worker->config->keep_alive;
-					else if (strncmp(str, "keep-alive", sizeof("keep-alive")-1) == 0)
+					else if (strncasecmp(str, "keep-alive", sizeof("keep-alive")-1) == 0)
 						client->keepalive = client->worker->config->keep_alive;
 					else
 						return 0;
-				} else if (strncmp(str, "Transfer-Encoding: ", sizeof("Transfer-Encoding: ")-1) == 0) {
+				} else if (strncasecmp(str, "Transfer-Encoding: ", sizeof("Transfer-Encoding: ")-1) == 0) {
 					/* transfer encoding header */
 					str += sizeof("Transfer-Encoding: ") - 1;
 
-					if (strncmp(str, "chunked", sizeof("chunked")-1) == 0)
+					if (strncasecmp(str, "chunked", sizeof("chunked")-1) == 0)
 						client->chunked = 1;
 					else
 						return 0;
