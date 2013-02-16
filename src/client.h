@@ -8,6 +8,12 @@
  *     MIT, see COPYING file
  */
 
+#include <sys/socket.h>
+
+#ifndef MSG_FASTOPEN
+#define MSG_FASTOPEN   0x20000000
+#endif
+
 struct Client {
 	enum {
 		CLIENT_START,
