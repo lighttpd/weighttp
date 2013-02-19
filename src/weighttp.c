@@ -159,7 +159,7 @@ static char *forge_request(char *url, char keep_alive, char **host, uint16_t *po
 			continue;
 		}
 		len += strlen(headers[i]) + strlen("\r\n");
-		if (strncmp(headers[i], "User-Agent: ", sizeof("User-Agent: ")-1) == 0)
+		if (strncmp(headers[i], "User-Agent:", sizeof("User-Agent:")-1) == 0)
 			have_user_agent = 1;
 	}
 
