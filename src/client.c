@@ -105,6 +105,9 @@ static void client_reset(Client *client) {
 	client->parser_offset = 0;
 	client->request_offset = 0;
 	client->ts_start = 0;
+	client->ts_connect = 0;
+	client->ts_endwrite = 0;
+	client->ts_beginread = 0;
 	client->ts_end = 0;
 	client->status_success = 0;
 	client->success = 0;
@@ -143,6 +146,7 @@ static uint8_t client_connect(Client *client) {
 
 	/* successfully connected */
 	client->state = CLIENT_WRITING;
+	client->ts_connect = ev_now(client->worker->loop);
 	return 1;
 }
 
@@ -183,6 +187,7 @@ void client_state_machine(Client *client) {
 			ev_io_set(&client->sock_watcher, r, EV_WRITE);
 			ev_io_start(client->worker->loop, &client->sock_watcher);
 
+			client->ts_start = ev_now(client->worker->loop);
 			if (!client_connect(client)) {
 				client->state = CLIENT_ERROR;
 				goto start;
@@ -213,6 +218,7 @@ void client_state_machine(Client *client) {
 					if (client->request_offset == config->request_size) {
 						/* whole request was sent, start reading */
 						client->state = CLIENT_READING;
+						client->ts_endwrite = ev_now(client->worker->loop);
 						client_set_events(client, EV_READ);
 					}
 
@@ -236,6 +242,8 @@ void client_state_machine(Client *client) {
 					client->state = CLIENT_ERROR;
 				} else if (r != 0) {
 					/* success */
+					if(0 == client->ts_beginread)
+						client->ts_beginread = ev_now(client->worker->loop);
 					client->bytes_received += r;
 					client->buffer_offset += r;
 					client->worker->stats.bytes_total += r;
@@ -277,9 +285,15 @@ void client_state_machine(Client *client) {
 			client->keepalive = 0;
 			client->success = 0;
 			client->state = CLIENT_END;
-		case CLIENT_END:
+		case CLIENT_END: {
 			/* update worker stats */
-			client->worker->stats.req_done++;
+			uint64_t index = client->worker->stats.req_done++;
+                        struct Times *s = &client->worker->stats.times[index];
+                        client->ts_end = ev_now(client->worker->loop);
+                        s->starttime = client->ts_start;
+                        s->ctime     = ap_max(0, client->ts_connect - client->ts_start);
+                        s->time      = ap_max(0, client->ts_end - client->ts_start);
+                        s->waittime  = ap_max(0, client->ts_beginread - client->ts_endwrite);
 
 			if (client->success) {
 				client->worker->stats.req_success++;
@@ -308,6 +322,7 @@ void client_state_machine(Client *client) {
 				client_reset(client);
 				goto start;
 			}
+		}
 	}
 }
 
