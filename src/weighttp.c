@@ -14,12 +14,13 @@ extern int optind, optopt; /* getopt */
 
 static void show_help(void) {
 	printf("weighttp <options> <url>\n");
-	printf("  -n num   number of requests    (mandatory)\n");
-	printf("  -t num   threadcount           (default: 1)\n");
-	printf("  -c num   concurrent clients    (default: 1)\n");
-	printf("  -k       keep alive            (default: no)\n");
-	printf("  -6       use ipv6              (default: no)\n");
+	printf("  -n num   number of requests     (mandatory)\n");
+	printf("  -t num   threadcount            (default: 1)\n");
+	printf("  -c num   concurrent clients     (default: 1)\n");
+	printf("  -k       keep alive             (default: no)\n");
+	printf("  -6       use ipv6               (default: no)\n");
 	printf("  -H str   add header to request\n");
+	printf("  -f       use Linux TCP_FASTOPEN (default: no)\n");
 	printf("  -h       show help and exit\n");
 	printf("  -v       show version and exit\n\n");
 	printf("example: weighttpd -n 10000 -c 10 -t 2 -k -H \"User-Agent: foo\" localhost/index.html\n\n");
@@ -93,7 +94,7 @@ static char *forge_request(char *url, char keep_alive, char **host, uint16_t *po
 	len = strlen(url);
 
 	if ((c = strchr(url, ':'))) {
-		/* found ':' => host:port */ 
+		/* found ':' => host:port */
 		*host = W_MALLOC(char, c - url + 1);
 		memcpy(*host, url, c - url);
 		(*host)[c - url] = '\0';
@@ -246,8 +247,9 @@ int main(int argc, char *argv[]) {
 	config.concur_count = 1;
 	config.req_count = 0;
 	config.keep_alive = 0;
+	config.linux_tcp_fastopen = 0;
 
-	while ((c = getopt(argc, argv, ":hv6kn:t:c:H:")) != -1) {
+	while ((c = getopt(argc, argv, ":hv6kfn:t:c:H:")) != -1) {
 		switch (c) {
 			case 'h':
 				show_help();
@@ -275,6 +277,9 @@ int main(int argc, char *argv[]) {
 				headers = W_REALLOC(headers, char*, headers_num+1);
 				headers[headers_num] = optarg;
 				headers_num++;
+				break;
+			case 'f':
+				config.linux_tcp_fastopen = 1;
 				break;
 			case '?':
 				W_ERROR("unkown option: -%c", optopt);

@@ -52,6 +52,7 @@ struct Config {
 	uint8_t thread_count;
 	uint16_t concur_count;
 	uint8_t keep_alive;
+	uint8_t linux_tcp_fastopen;
 
 	char *request;
 	uint32_t request_size;
