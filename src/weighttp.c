@@ -217,7 +217,7 @@ int main(int argc, char *argv[]) {
 	Worker **workers;
 	pthread_t *threads;
 	int i;
-	char c;
+	signed char c;
 	int err;
 	struct ev_loop *loop;
 	ev_tstamp ts_start, ts_end;
