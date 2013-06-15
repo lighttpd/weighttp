@@ -217,7 +217,7 @@ int main(int argc, char *argv[]) {
 	Worker **workers;
 	pthread_t *threads;
 	int i;
-	char c;
+	int opt;
 	int err;
 	struct ev_loop *loop;
 	ev_tstamp ts_start, ts_end;
@@ -247,8 +247,8 @@ int main(int argc, char *argv[]) {
 	config.req_count = 0;
 	config.keep_alive = 0;
 
-	while ((c = getopt(argc, argv, ":hv6kn:t:c:H:")) != -1) {
-		switch (c) {
+	while ((opt = getopt(argc, argv, ":hv6kn:t:c:H:")) != -1) {
+		switch (opt) {
 			case 'h':
 				show_help();
 				return 0;
