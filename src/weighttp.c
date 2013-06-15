@@ -277,7 +277,11 @@ int main(int argc, char *argv[]) {
 				headers_num++;
 				break;
 			case '?':
-				W_ERROR("unkown option: -%c", optopt);
+				if ('?' != optopt) W_ERROR("unkown option: -%c\n", optopt);
+				show_help();
+				return 1;
+			case ':':
+				W_ERROR("option requires an argument: -%c\n", optopt);
 				show_help();
 				return 1;
 		}
