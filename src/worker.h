@@ -48,6 +48,15 @@ struct Worker {
 	uint16_t num_clients;
 	Stats stats;
 	uint64_t progress_interval;
+
+#define LADDR_PORT_BEG    10000
+#define LADDR_PORT_END    60000
+#define LADDR_PORT_RANGE  LADDR_PORT_END - LADDR_PORT_BEG;
+
+  uint16_t laddrs_ip_beg;
+  uint16_t laddrs_ip_end;
+  uint16_t current_laddr;
+  uint16_t current_port;
 };
 
 

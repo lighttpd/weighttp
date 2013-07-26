@@ -56,6 +56,10 @@ struct Config {
 	char *request;
 	uint32_t request_size;
 	struct addrinfo *saddr;
+
+#define LOCAL_ADDRESS_MAX 4096
+	uint16_t laddr_size;
+  struct sockaddr_in laddres[LOCAL_ADDRESS_MAX];
 };
 
 uint64_t str_to_uint64(char *str);

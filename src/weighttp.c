@@ -11,6 +11,14 @@
 #include <math.h>
 #include "weighttp.h"
 
+#include <arpa/inet.h>
+#include <net/if.h>
+#include <netinet/in.h>
+#include <sys/ioctl.h>
+#include <sys/socket.h>
+
+
+
 extern int optind, optopt; /* getopt */
 
 static void show_help(void) {
@@ -21,6 +29,8 @@ static void show_help(void) {
 	printf("  -k       keep alive            (default: no)\n");
 	printf("  -6       use ipv6              (default: no)\n");
 	printf("  -H str   add header to request\n");
+	printf("  -L ip    local ip address\n");
+  printf("  -M mask  local network mask\n");
 	printf("  -h       show help and exit\n");
 	printf("  -v       show version and exit\n\n");
 	printf("example: weighttpd -n 10000 -c 10 -t 2 -k -H \"User-Agent: foo\" localhost/index.html\n\n");
@@ -227,7 +237,7 @@ static int compwait(struct Times * a, struct Times * b)
 
 static void output_results(uint64_t done, struct Times * stats) {
   /* work out connection times */
-  int i;
+  uint16_t i;
   ev_tstamp totalcon = 0, total = 0, totald = 0, totalwait = 0;
   ev_tstamp meancon, meantot, meand, meanwait;
   ev_tstamp mincon = ULONG_MAX, mintot = ULONG_MAX, mind = ULONG_MAX,
@@ -380,6 +390,41 @@ static void output_results(uint64_t done, struct Times * stats) {
   }
 }
 
+
+static int setup_local_addresses(in_addr_t laddr, in_addr_t lmask,
+                                 Config * config) {
+  int count, i;
+  struct ifreq interfaces[LOCAL_ADDRESS_MAX];
+  struct ifconf req;
+
+  int fd = socket(PF_INET, SOCK_DGRAM, IPPROTO_IP);
+  if (-1 == fd) {
+    fprintf(stderr, "Failed to create socket. error = %s", strerror(errno));
+    return -1;
+  }
+
+  bzero(&interfaces, sizeof(interfaces));
+  req.ifc_len = sizeof(interfaces);
+  req.ifc_req = interfaces;
+
+  if (ioctl(fd, SIOCGIFCONF, &req)) {
+    fprintf(stderr, "Failed to list interfaces. error = %s", strerror(errno));
+    close(fd);
+    return errno;
+  }
+
+  count = req.ifc_len / sizeof(interfaces[0]);
+  config->laddr_size = 0;
+  for (i = 0; i < count; ++i) {
+    struct sockaddr_in * in = (struct sockaddr_in *) (&interfaces[i].ifr_addr);
+    if (laddr == (in->sin_addr.s_addr & lmask))
+      config->laddres[config->laddr_size++] = *in;
+  }
+
+  close(fd);
+  return 0;
+}
+
 int main(int argc, char *argv[]) {
 	Worker **workers;
 	pthread_t *threads;
@@ -403,6 +448,8 @@ int main(int argc, char *argv[]) {
 	uint8_t headers_num;
 	struct Times * times;
 	uint64_t times_offet;
+  in_addr_t laddr;
+  in_addr_t lmask;
 
 	printf("weighttp - a lightweight and simple webserver benchmarking tool\n\n");
 
@@ -416,7 +463,11 @@ int main(int argc, char *argv[]) {
 	config.req_count = 0;
 	config.keep_alive = 0;
 
-	while ((c = getopt(argc, argv, ":hv6kn:t:c:H:")) != -1) {
+	laddr = 0;
+	lmask = 0;
+	config.laddr_size = 0;
+
+	while ((c = getopt(argc, argv, ":hv6kn:t:c:H:L:M:")) != -1) {
 		switch (c) {
 			case 'h':
 				show_help();
@@ -440,6 +491,12 @@ int main(int argc, char *argv[]) {
 			case 'c':
 				config.concur_count = atoi(optarg);
 				break;
+      case 'L':
+        laddr = inet_addr(optarg);
+        break;
+      case 'M':
+        lmask = inet_addr(optarg);
+        break;
 			case 'H':
 				headers = W_REALLOC(headers, char*, headers_num+1);
 				headers[headers_num] = optarg;
@@ -484,6 +541,16 @@ int main(int argc, char *argv[]) {
 		return 1;
 	}
 
+  if (0 != laddr) {
+    if (0 == lmask) {
+      config.laddr_size = 1;
+      config.laddres[0].sin_family = AF_INET;
+      config.laddres[0].sin_port = 0;
+      config.laddres[0].sin_addr.s_addr = laddr;
+    } else {
+      setup_local_addresses(laddr, lmask, &config);
+    }
+  }
 
 	loop = ev_default_loop(0);
 	if (!loop) {

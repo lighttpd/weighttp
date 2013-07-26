@@ -9,6 +9,7 @@
  */
 
 #include "weighttp.h"
+#include <arpa/inet.h>
 
 static uint8_t client_parse(Client *client, int size);
 static void client_io_cb(struct ev_loop *loop, ev_io *w, int revents);
@@ -160,7 +161,7 @@ static void client_io_cb(struct ev_loop *loop, ev_io *w, int revents) {
 }
 
 void client_state_machine(Client *client) {
-	int r;
+	int r, ret;
 	Config *config = client->worker->config;
 
 	start:
@@ -179,6 +180,26 @@ void client_state_machine(Client *client) {
 				W_ERROR("socket() failed: %s (%d)", client->buffer, errno);
 				goto start;
 			}
+
+      /* bind to local address */
+      if (0 != config->laddr_size) {
+        do {
+          struct sockaddr_in laddr;
+          uint16_t port = client->worker->current_port++;
+          if (client->worker->current_port >= LADDR_PORT_END) {
+            client->worker->current_port = LADDR_PORT_BEG;
+            client->worker->current_laddr++;
+          }
+          if (client->worker->current_laddr >= client->worker->laddrs_ip_end) {
+            client->worker->current_laddr = client->worker->laddrs_ip_beg;
+          }
+
+          /* select local address */
+          laddr = config->laddres[client->worker->current_laddr];
+          laddr.sin_port = htons(port);
+          ret = bind(r, (struct sockaddr *) &laddr, sizeof(laddr));
+        } while (-1 == ret);
+      }
 
 			/* set non-blocking */
 			fcntl(r, F_SETFL, O_NONBLOCK | O_RDWR);
@@ -287,13 +308,15 @@ void client_state_machine(Client *client) {
 			client->state = CLIENT_END;
 		case CLIENT_END: {
 			/* update worker stats */
-			uint64_t index = client->worker->stats.req_done++;
-                        struct Times *s = &client->worker->stats.times[index];
-                        client->ts_end = ev_now(client->worker->loop);
-                        s->starttime = client->ts_start;
-                        s->ctime     = ap_max(0, client->ts_connect - client->ts_start);
-                        s->time      = ap_max(0, client->ts_end - client->ts_start);
-                        s->waittime  = ap_max(0, client->ts_beginread - client->ts_endwrite);
+			uint64_t times_index;
+      struct Times * s;
+      times_index = client->worker->stats.req_done++;
+      s= &client->worker->stats.times[times_index];
+      client->ts_end = ev_now(client->worker->loop);
+      s->starttime = client->ts_start;
+      s->ctime = ap_max(0, client->ts_connect - client->ts_start);
+      s->time = ap_max(0, client->ts_end - client->ts_start);
+      s->waittime = ap_max(0, client->ts_beginread - client->ts_endwrite);
 
 			if (client->success) {
 				client->worker->stats.req_success++;
