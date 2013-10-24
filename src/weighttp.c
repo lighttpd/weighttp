@@ -354,20 +354,15 @@ int main(int argc, char *argv[]) {
 	for (i = 0; i < config.thread_count; i++) {
 		uint64_t reqs = config.req_count / config.thread_count;
 		uint16_t concur = config.concur_count / config.thread_count;
-		uint64_t diff;
 
 		if (rest_concur) {
-			diff = (i == config.thread_count) ? rest_concur : (rest_concur / config.thread_count);
-			diff = diff ? diff : 1;
-			concur += diff;
-			rest_concur -= diff;
+			concur += 1;
+			rest_concur -= 1;
 		}
 
 		if (rest_req) {
-			diff = (i == config.thread_count) ? rest_req : (rest_req / config.thread_count);
-			diff = diff ? diff : 1;
-			reqs += diff;
-			rest_req -= diff;
+			reqs += 1;
+			rest_req -= 1;
 		}
 		printf("spawning thread #%d: %"PRIu16" concurrent requests, %"PRIu64" total requests\n", i+1, concur, reqs);
 		workers[i] = worker_new(i+1, &config, concur, reqs);
