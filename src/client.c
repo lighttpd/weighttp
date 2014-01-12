@@ -118,10 +118,35 @@ static void client_reset(Client *client) {
 }
 
 static uint8_t client_connect(Client *client) {
+        int ret;
+        Config *config = client->worker->config;
+
 	//printf("connecting...\n");
 	start:
 
-	if (-1 == connect(client->sock_watcher.fd, client->worker->config->saddr->ai_addr, client->worker->config->saddr->ai_addrlen)) {
+	/*
+	 * If the user have enabled the TCP_FASTOPEN feature, start
+	 * communicating with sendto()
+	 */
+        if (config->linux_tcp_fastopen) {
+		ret = sendto(client->sock_watcher.fd, NULL, 0, MSG_FASTOPEN, client->worker->config->saddr->ai_addr, client->worker->config->saddr->ai_addrlen);
+		if (ret == -1 && errno == EOPNOTSUPP) {
+			printf("\nError: the server do not support TCP_FASTOPEN or the feature\n"
+			       "is disabled in the Kernel:\n\n"
+			       "  - Verify that your server is running at least Linux Kernel 3.7\n"
+			       "  - Verify that this machine is running at least Linux Kernel 3.6\n"
+			       "  - Check on both machines that TCP_FASTOPEN is enabled:\n\n"
+			       "       # cat /proc/sys/net/ipv4/tcp_fastopen\n\n"
+			       "    if the value is zero then enable it with:\n\n"
+			       "       # echo 1 > /proc/sys/net/ipv4/tcp_fastopen\n\n");
+			exit(EXIT_FAILURE);
+		}
+        }
+        else {
+		ret = connect(client->sock_watcher.fd, client->worker->config->saddr->ai_addr, client->worker->config->saddr->ai_addrlen);
+        }
+
+	if (ret == -1) {
 		switch (errno) {
 			case EINPROGRESS:
 			case EALREADY:
@@ -196,9 +221,10 @@ void client_state_machine(Client *client) {
 				goto start;
 			}
 		case CLIENT_WRITING:
-			while (1) {
-				r = write(client->sock_watcher.fd, &config->request[client->request_offset], config->request_size - client->request_offset);
+                        while (1) {
+                                r = write(client->sock_watcher.fd, &config->request[client->request_offset], config->request_size - client->request_offset);
 				//printf("write(%d - %d = %d): %d\n", config->request_size, client->request_offset, config->request_size - client->request_offset, r);
+
 				if (r == -1) {
 					/* error */
 					if (errno == EINTR)
@@ -290,7 +316,7 @@ void client_state_machine(Client *client) {
 
 			/* print progress every 10% done */
 			if (client->worker->id == 1 && client->worker->stats.req_done % client->worker->progress_interval == 0) {
-				printf("progress: %3d%% done\n",
+				fprintf(stderr, "progress: %3d%% done\n",
 					(int) (client->worker->stats.req_done * 100 / client->worker->stats.req_todo)
 				);
 			}

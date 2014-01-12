@@ -14,13 +14,15 @@ extern int optind, optopt; /* getopt */
 
 static void show_help(void) {
 	printf("weighttp <options> <url>\n");
-	printf("  -n num   number of requests    (mandatory)\n");
-	printf("  -t num   threadcount           (default: 1)\n");
-	printf("  -c num   concurrent clients    (default: 1)\n");
-	printf("  -k       keep alive            (default: no)\n");
-	printf("  -6       use ipv6              (default: no)\n");
+	printf("  -n num   number of requests     (mandatory)\n");
+	printf("  -t num   threadcount            (default: 1)\n");
+	printf("  -c num   concurrent clients     (default: 1)\n");
+	printf("  -k       keep alive             (default: no)\n");
+	printf("  -6       use ipv6               (default: no)\n");
 	printf("  -H str   add header to request\n");
+	printf("  -f       use Linux TCP_FASTOPEN (default: no)\n");
 	printf("  -h       show help and exit\n");
+	printf("  -j       JSON output\n");
 	printf("  -v       show version and exit\n\n");
 	printf("example: weighttpd -n 10000 -c 10 -t 2 -k -H \"User-Agent: foo\" localhost/index.html\n\n");
 }
@@ -93,7 +95,7 @@ static char *forge_request(char *url, char keep_alive, char **host, uint16_t *po
 	len = strlen(url);
 
 	if ((c = strchr(url, ':'))) {
-		/* found ':' => host:port */ 
+		/* found ':' => host:port */
 		*host = W_MALLOC(char, c - url + 1);
 		memcpy(*host, url, c - url);
 		(*host)[c - url] = '\0';
@@ -235,7 +237,7 @@ int main(int argc, char *argv[]) {
 	char **headers;
 	uint8_t headers_num;
 
-	printf("weighttp - a lightweight and simple webserver benchmarking tool\n\n");
+	fprintf(stderr, "weighttp - a lightweight and simple webserver benchmarking tool\n\n");
 
 	headers = NULL;
 	headers_num = 0;
@@ -246,8 +248,10 @@ int main(int argc, char *argv[]) {
 	config.concur_count = 1;
 	config.req_count = 0;
 	config.keep_alive = 0;
+	config.json_output = 0;
+	config.linux_tcp_fastopen = 0;
 
-	while ((opt = getopt(argc, argv, ":hv6kn:t:c:H:")) != -1) {
+	while ((opt = getopt(argc, argv, ":hv6kfjn:t:c:H:")) != -1) {
 		switch (opt) {
 			case 'h':
 				show_help();
@@ -258,6 +262,9 @@ int main(int argc, char *argv[]) {
 				return 0;
 			case '6':
 				use_ipv6 = 1;
+				break;
+			case 'j':
+				config.json_output = 1;
 				break;
 			case 'k':
 				config.keep_alive = 1;
@@ -275,6 +282,9 @@ int main(int argc, char *argv[]) {
 				headers = W_REALLOC(headers, char*, headers_num+1);
 				headers[headers_num] = optarg;
 				headers_num++;
+				break;
+			case 'f':
+				config.linux_tcp_fastopen = 1;
 				break;
 			case '?':
 				if ('?' != optopt) W_ERROR("unkown option: -%c\n", optopt);
@@ -346,7 +356,7 @@ int main(int argc, char *argv[]) {
 	rest_concur = config.concur_count % config.thread_count;
 	rest_req = config.req_count % config.thread_count;
 
-	printf("starting benchmark...\n");
+	fprintf(stderr, "starting benchmark...\n");
 
 	memset(&stats, 0, sizeof(stats));
 	ts_start = ev_time();
@@ -364,7 +374,7 @@ int main(int argc, char *argv[]) {
 			reqs += 1;
 			rest_req -= 1;
 		}
-		printf("spawning thread #%d: %"PRIu16" concurrent requests, %"PRIu64" total requests\n", i+1, concur, reqs);
+		fprintf(stderr, "spawning thread #%d: %"PRIu16" concurrent requests, %"PRIu64" total requests\n", i+1, concur, reqs);
 		workers[i] = worker_new(i+1, &config, concur, reqs);
 
 		if (!(workers[i])) {
@@ -413,16 +423,40 @@ int main(int argc, char *argv[]) {
 	microsec = duration * 1000;
 	rps = stats.req_done / (ts_end - ts_start);
 	kbps = stats.bytes_total / (ts_end - ts_start) / 1024;
-	printf("\nfinished in %d sec, %d millisec and %d microsec, %"PRIu64" req/s, %"PRIu64" kbyte/s\n", sec, millisec, microsec, rps, kbps);
-	printf("requests: %"PRIu64" total, %"PRIu64" started, %"PRIu64" done, %"PRIu64" succeeded, %"PRIu64" failed, %"PRIu64" errored\n",
-		config.req_count, stats.req_started, stats.req_done, stats.req_success, stats.req_failed, stats.req_error
-	);
-	printf("status codes: %"PRIu64" 2xx, %"PRIu64" 3xx, %"PRIu64" 4xx, %"PRIu64" 5xx\n",
-		stats.req_2xx, stats.req_3xx, stats.req_4xx, stats.req_5xx
-	);
-	printf("traffic: %"PRIu64" bytes total, %"PRIu64" bytes http, %"PRIu64" bytes data\n",
-		stats.bytes_total,  stats.bytes_total - stats.bytes_body, stats.bytes_body
-	);
+
+	if (!config.json_output) {
+		printf("\nfinished in %d sec, %d millisec and %d microsec, %"PRIu64" req/s, %"PRIu64" kbyte/s\n", sec, millisec, microsec, rps, kbps);
+		printf("requests: %"PRIu64" total, %"PRIu64" started, %"PRIu64" done, %"PRIu64" succeeded, %"PRIu64" failed, %"PRIu64" errored\n",
+			config.req_count, stats.req_started, stats.req_done, stats.req_success, stats.req_failed, stats.req_error
+		);
+		printf("status codes: %"PRIu64" 2xx, %"PRIu64" 3xx, %"PRIu64" 4xx, %"PRIu64" 5xx\n",
+			stats.req_2xx, stats.req_3xx, stats.req_4xx, stats.req_5xx
+		);
+		printf("traffic: %"PRIu64" bytes total, %"PRIu64" bytes http, %"PRIu64" bytes data\n",
+			stats.bytes_total,  stats.bytes_total - stats.bytes_body, stats.bytes_body
+		);
+	} else {
+		printf("{\n");
+		printf("  \"finished_in\": {\n");
+		printf("      \"secs\": %d,\n", sec);
+		printf("      \"millisecs\": %d,\n", millisec);
+		printf("      \"microsecs\": %d\n", microsec);
+		printf("  },\n");
+		printf("  \"reqs_per_sec\": %"PRIu64 ",\n", rps);
+		printf("  \"kbyte_per_sec\": %"PRIu64 ",\n", kbps);
+		printf("  \"status_codes\": {\n");
+		printf("      \"2xx\": %"PRIu64",\n", stats.req_2xx);
+		printf("      \"3xx\": %"PRIu64",\n", stats.req_3xx);
+		printf("      \"4xx\": %"PRIu64",\n", stats.req_4xx);
+		printf("      \"5xx\": %"PRIu64"\n", stats.req_5xx);
+		printf("  },\n");
+		printf("  \"traffic\": {\n");
+		printf("      \"bytes_total\": %"PRIu64",\n", stats.bytes_total);
+		printf("      \"bytes_http\": %"PRIu64",\n", stats.bytes_total - stats.bytes_body);
+		printf("      \"bytes_data\": %"PRIu64"\n", stats.bytes_body);
+		printf("   }\n");
+		printf("}\n");
+	}
 
 	ev_default_destroy();
 
