@@ -431,11 +431,6 @@ static uint8_t client_parse(Client *client, int size) {
 					str, client->chunk_received, client->chunk_size, client->parser_offset, size
 				);*/
 
-				// no more data, give back control to main loop
-				if (size == 0) {
-					return 1;
-				}
-
 				if (client->chunk_size == -1) {
 					/* read chunk size */
 					client->chunk_size = 0;
@@ -453,6 +448,8 @@ static uint8_t client_parse(Client *client, int size) {
 							client->chunk_size += 10 + *str - 'A';
 						else if (*str >= 'a' && *str <= 'z')
 							client->chunk_size += 10 + *str - 'a';
+						else if (!str)
+							return (size > 64) ? 0 : 1; /* wait for more data, but only for a maximum line length of 64 */
 						else
 							return 0;
 					}
