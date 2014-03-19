@@ -427,9 +427,14 @@ static uint8_t client_parse(Client *client, int size) {
 				int consume_max;
 
 				str = &client->buffer[client->parser_offset];
-				/*printf("parsing chunk: '%s'\n(%"PRIi64" received, %"PRIi64" size, %d parser offset)\n",
-					str, client->chunk_received, client->chunk_size, client->parser_offset
+				/*printf("parsing chunk: '%s'\n(%"PRIi64" received, %"PRIi64" size, %d parser offset, %d size)\n",
+					str, client->chunk_received, client->chunk_size, client->parser_offset, size
 				);*/
+
+				// no more data, give back control to main loop
+				if (size == 0) {
+					return 1;
+				}
 
 				if (client->chunk_size == -1) {
 					/* read chunk size */
