@@ -3,11 +3,36 @@ weighttp - a lightweight and simple webserver benchmarking tool
 
 Please see http://weighttp.lighttpd.net/ for current info.
 
+DEPENDENCIES
+============
 
-BUILD
+Requires libev; can be found in your distro's repository or at
+http://software.schmorp.de/pkg/libev.html
+
+BUILD (autobuild)
 =====
 
-Make sure you have libev* and python (for waf) installed, then:
+When running from git (should not be necessary when building from tar),
+requires automake, autoconf and friends:
+
+$ ./autogen.sh
+
+Then:
+
+$ ./configure
+$ make
+
+INSTALL (autobuild)
+=======
+
+$ make install
+or
+$ sudo make install
+
+BUILD (waf)
+=====
+
+Make sure you have python installed, then:
 
 $ ./waf configure
 $ ./waf build
@@ -15,7 +40,7 @@ $ ./waf build
 See ./waf --help for available configure options and other commands available.
 
 
-INSTALL
+INSTALL (waf)
 =======
 
 $ ./waf install
@@ -27,20 +52,3 @@ USAGE
 =====
 
 $ weighttp -h
-
-
-UNINSTALL
-=========
-
-$ ./waf uninstall
-or
-$ sudo ./waf uninstall
-
-
-You can also chain commands:
-
-$ ./waf configure clean build install
-
-----
-
-* libev can be found in your distro's repository or at http://software.schmorp.de/pkg/libev.html

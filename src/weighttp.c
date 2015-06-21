@@ -164,7 +164,7 @@ static char *forge_request(char *url, char keep_alive, char **host, uint16_t *po
 	}
 
 	if (!have_user_agent)
-		len += strlen("User-Agent: weighttp/" VERSION "\r\n");
+		len += strlen("User-Agent: weighttp/" PACKAGE_VERSION "\r\n");
 
 	req = W_MALLOC(char, len);
 
@@ -182,7 +182,7 @@ static char *forge_request(char *url, char keep_alive, char **host, uint16_t *po
 	strcat(req, "\r\n");
 
 	if (!have_user_agent)
-		sprintf(req + strlen(req), "User-Agent: weighttp/" VERSION "\r\n");
+		sprintf(req + strlen(req), "User-Agent: weighttp/" PACKAGE_VERSION "\r\n");
 
 	for (i = 0; i < headers_num; i++) {
 		if (strncmp(headers[i], "Host:", sizeof("Host:")-1) == 0)
@@ -235,7 +235,7 @@ int main(int argc, char *argv[]) {
 	char **headers;
 	uint8_t headers_num;
 
-	printf("weighttp - a lightweight and simple webserver benchmarking tool\n\n");
+	printf("weighttp " PACKAGE_VERSION " - a lightweight and simple webserver benchmarking tool\n\n");
 
 	headers = NULL;
 	headers_num = 0;
@@ -253,8 +253,6 @@ int main(int argc, char *argv[]) {
 				show_help();
 				return 0;
 			case 'v':
-				printf("version:    " VERSION "\n");
-				printf("build-date: " __DATE__ " " __TIME__ "\n\n");
 				return 0;
 			case '6':
 				use_ipv6 = 1;

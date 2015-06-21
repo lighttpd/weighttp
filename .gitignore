@@ -2,5 +2,14 @@
 .lock-wscript
 .DS_Store
 *~
-build
+*build
 weighttp
+Makefile.in
+aclocal.m4
+compile
+configure
+depcomp
+install-sh
+missing
+autom4te.cache/
+config.h.in
