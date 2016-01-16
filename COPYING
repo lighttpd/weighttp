@@ -1,3 +1,14 @@
+Copyright (c) 2016, Glue Logic LLC. All rights reserved. code()gluelogic.com
+
+License: MIT License (see below)
+
+================
+
+This rewrite is based on weighttp by Thomas Porzelt
+  git://git.lighttpd.net/weighttp
+  https://github.com/lighttpd/weighttp/
+
+================
 
 The MIT License
 

@@ -1,9 +1,11 @@
 .waf-*
+.deps/
 .lock-wscript
 .DS_Store
 *~
 *build
 weighttp
+Makefile
 Makefile.in
 aclocal.m4
 compile
@@ -12,4 +14,9 @@ depcomp
 install-sh
 missing
 autom4te.cache/
+config.cache
+config.h
 config.h.in
+config.log
+config.status
+stamp-h1

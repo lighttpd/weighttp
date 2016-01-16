@@ -43,47 +43,15 @@ AC_SEARCH_LIBS([pthread_create], [pthread], [
 ])
 
 
-## libev
-AC_MSG_CHECKING([for libev support])
-AC_ARG_WITH([libev],
-    [AS_HELP_STRING([--with-libev@<:@=PATH@:>@],[Search for libev in PATH/include and PATH/lib])],
-    [WITH_LIBEV=$withval],[WITH_LIBEV=yes])
-
-LIBEV_CFLAGS=""
-LIBEV_LIBS=""
-
-PKG_CHECK_MODULES([LIBEV], [libev], [], [
-  # no pkg-config for libev, searching manually:
-
-  if test "$WITH_LIBEV" != "yes"; then
-    LIBEV_CFLAGS="-I$WITH_LIBEV/include"
-    LIBEV_LIBS="-L$WITH_LIBEV/lib -lev"
-  else
-    AC_CHECK_HEADERS([ev.h],[
-      AC_CHECK_LIB([ev], [ev_time], [
-          LIBEV_LIBS="-lev"
-        ],[
-          AC_MSG_ERROR([libev not found])
-        ]
-      )],[
-        AC_MSG_ERROR([libev not found])
-      ]
-    )
-  fi
-])
-
-AC_SUBST([LIBEV_CFLAGS])
-AC_SUBST([LIBEV_LIBS])
-
-# libev has (compiler warning) problems with strict aliasing... - just disable it
-TRY_CFLAGS([-fno-strict-aliasing])
-TRY_CFLAGS([-fPIC])
-
 # check for extra compiler options (warning options)
 if test "${GCC}" = "yes"; then
   TRY_CFLAGS([-Wall -W -Wshadow -pedantic])
-  TRY_CFLAGS([-std=gnu99])
+  TRY_CFLAGS([-std=c11 -D_XOPEN_SOURCE=700])
 fi
+
+TRY_CFLAGS([-g])
+TRY_CFLAGS([-g2])
+TRY_CFLAGS([-O2])
 
 AC_ARG_ENABLE(extra-warnings,
  AC_HELP_STRING([--enable-extra-warnings],[enable extra warnings (gcc specific)]),
@@ -94,7 +62,7 @@ AC_ARG_ENABLE(extra-warnings,
   esac],[extrawarnings=false])
 
 if test x$extrawarnings = xtrue; then
-  TRY_CFLAGS([-g -O2 -g2 -Wall -Wmissing-declarations -Wdeclaration-after-statement -Wcast-align -Winline -Wsign-compare -Wnested-externs -Wpointer-arith -Wl,--as-needed -D_FORTIFY_SOURCE=2 -fstack-protector --param=ssp-buffer-size=4 -Wformat -Werror=format-security])
+  TRY_CFLAGS([-Wall -Wmissing-declarations -Wcast-align -Winline -Wsign-compare -Wnested-externs -Wpointer-arith -Wl,--as-needed -D_FORTIFY_SOURCE=2 -fstack-protector --param=ssp-buffer-size=4 -Wformat -Werror=format-security])
 fi
 
 AC_CONFIG_FILES([Makefile src/Makefile])

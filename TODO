@@ -1,6 +1,23 @@
-- timing statistics
-- generally better statistics
-- ssl support
-- better error reporting
-- pipelining
-- fuzzer
+TODO
+----
+
+- timeouts, time limits, timing statistics
+- TLS support
+- consider employing bpoll event framework to replace poll()
+  (https://github.com/gstrauss/bsock)
+
+
+Notes
+-----
+
+- traditional poll() is very portable and is a reasonable choice for use of
+  weighttp on a local network with high percentage of active descriptors
+  (ready events) each poll().  However, for a huge number of concurrent
+  connections (e.g. thousands), a more advanced event framework (such as
+  bpoll, libuv, libev, libevent) might be more performant.
+
+- Using tcmalloc did not appear to measurably improve performance.  YMMV.
+    export LD_PRELOAD=/usr/lib64/libtcmalloc.so.4
+  This is expected since memory allocations in the rewritten weighttp all occur
+  at startup, and the majority are done per-thread for exclusive use by each
+  thread.

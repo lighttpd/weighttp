@@ -1,13 +1,15 @@
 weighttp - a lightweight and simple webserver benchmarking tool
------------------------------------------
+---------------------------------------------------------------
+
+This rewrite is based on weighttp by Thomas Porzelt
+  git://git.lighttpd.net/weighttp
+  https://github.com/lighttpd/weighttp/
+
+Contact code () gluelogic . com with comments or suggestions.
+
+---------------------------------------------------------------
 
 Please see http://weighttp.lighttpd.net/ for current info.
-
-DEPENDENCIES
-============
-
-Requires libev; can be found in your distro's repository or at
-http://software.schmorp.de/pkg/libev.html
 
 BUILD (autobuild)
 =====
