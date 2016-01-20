@@ -21,7 +21,7 @@
 #include <sys/stat.h>  /* fstat() */
 #include <sys/time.h>  /* gettimeofday() */
 #include <errno.h>     /* errno EINTR EAGAIN EWOULDBLOCK EINPROGRESS EALREADY */
-#include <fcntl.h>     /* open() fcntl() F_SETFL O_NONBLOCK (O_* flags) */
+#include <fcntl.h>     /* open() fcntl() pipe2() F_SETFL (O_* flags) */
 #include <inttypes.h>  /* PRIu64 PRId64 */
 #include <limits.h>    /* USHRT_MAX */
 #include <locale.h>    /* setlocale() */
@@ -44,6 +44,17 @@
 #include <netinet/tcp.h>
 #include <netinet/in.h>
 #include <sys/un.h>
+#endif
+
+#ifdef WEIGHTTP_SPLICE /* not defined by default; might benefit w/ pipelining */
+#ifdef SPLICE_F_NONBLOCK
+#include <sys/uio.h>   /* vmsplice() (struct iovec) */
+/*(Using tee(), splice() does not appear to have measurable benefit over write()
+ * for small requests, which is the typical use case.  Not implemented, but the
+ * same probably holds for small responses.  For large responses, might be a
+ * benefit to splice() to pipe() and then from pipe() to fd open to /dev/null,
+ * which can be done when Content-Length is supplied (instead of chunked)) */
+#endif
 #endif
 
 #ifndef SOCK_NONBLOCK
@@ -223,6 +234,9 @@ struct Client {
     int http_head;
     int so_bufsz;
 
+  #ifdef WEIGHTTP_SPLICE
+    int pipefds[3];
+  #endif
     uint32_t request_size;
     const char *request;
     struct pollfd *pfd;
@@ -233,6 +247,9 @@ struct Client {
 };
 
 struct Worker {
+  #ifdef WEIGHTTP_SPLICE
+    int pipefds[2];
+  #endif
     struct pollfd *pfds;
     Client *clients;
     Stats stats;
@@ -275,6 +292,9 @@ struct Config {
     int so_bufsz;
 
     int quiet;
+  #ifdef WEIGHTTP_SPLICE
+    int reqpipe;
+  #endif
     uint32_t request_size;
     char *request;
     char buf[16384]; /*(used for simple 8k memaligned request buffer on stack)*/
@@ -310,6 +330,12 @@ client_init (Worker * const restrict worker,
     /* future: might copy config->request to new allocation in Worker
      * so that all memory accesses during benchmark execution are to
      * independent, per-thread allocations */
+
+  #ifdef WEIGHTTP_SPLICE
+    client->pipefds[0]       = worker->pipefds[0];
+    client->pipefds[1]       = worker->pipefds[1];
+    client->pipefds[2]       = config->reqpipe;
+  #endif
 }
 
 
@@ -341,6 +367,14 @@ worker_init (Worker * const restrict worker,
     worker->raddr.ai_addr = (struct sockaddr *)
       memcpy(&worker->raddr_storage,
              &config->raddr_storage, config->raddr.ai_addrlen);
+  #ifdef WEIGHTTP_SPLICE
+    worker->pipefds[0] = -1;
+    worker->pipefds[1] = -1;
+    if (-1 != config->reqpipe) {
+        if (0 != pipe2(worker->pipefds, O_NONBLOCK))
+            perror("pipe()");
+    }
+  #endif
     const int num_clients = wconf->num_clients;
     worker->stats.req_todo = wconf->num_requests;
     worker->pfds = (struct pollfd *)calloc(num_clients, sizeof(struct pollfd));
@@ -374,6 +408,11 @@ worker_delete (Worker * const restrict worker,
         client_delete(worker->clients+i);
     free(worker->clients);
     free(worker->pfds);
+
+  #ifdef WEIGHTTP_SPLICE
+    if (-1 != worker->pipefds[0]) close(worker->pipefds[0]);
+    if (-1 != worker->pipefds[1]) close(worker->pipefds[1]);
+  #endif
 }
 
 
@@ -383,6 +422,25 @@ __attribute_nonnull__
 static void
 wconfs_init (Config * const restrict config)
 {
+  #ifdef WEIGHTTP_SPLICE
+    int pipefds[2];
+    if (0 != pipe2(pipefds, O_NONBLOCK))
+        perror("pipe2()");
+    else {
+        struct iovec iov = { config->request, config->request_size };
+        const ssize_t vms = vmsplice(pipefds[1], &iov, 1, SPLICE_F_GIFT);
+        if (vms == config->request_size)
+            config->reqpipe = pipefds[0];
+        else {
+            config->reqpipe = -1;
+            if (-1 == vms)
+                perror("vmsplice()");
+            close(pipefds[0]);
+        }
+        close(pipefds[1]);
+    }
+  #endif
+
     /* create Worker_Config data structures for each (future) thread */
     Worker_Config * const restrict wconfs =
       (Worker_Config *)calloc(config->thread_count, sizeof(Worker_Config));
@@ -428,6 +486,10 @@ wconfs_delete (const Config * const restrict config)
     if (config->request < config->buf
         || config->buf+sizeof(config->buf) <= config->request)
         free(config->request);
+
+  #ifdef WEIGHTTP_SPLICE
+    if (-1 != config->reqpipe) close(config->reqpipe);
+  #endif
 }
 
 
@@ -919,6 +981,22 @@ client_parse (Client * const restrict client)
 }
 
 
+#ifdef WEIGHTTP_SPLICE
+__attribute_cold__
+__attribute_noinline__
+static void
+client_discard_from_pipe (const int fd)
+{
+    char buf[8192];
+    ssize_t rd;
+    do {
+        rd = read(fd, buf, sizeof(buf));
+    } while (__builtin_expect( (rd == sizeof(buf)), 0)
+             || (__builtin_expect( (-1 == rd), 0) && errno == EINTR));
+}
+#endif
+
+
 __attribute_nonnull__
 static void
 client_revents (Client * const restrict client)
@@ -1012,6 +1090,28 @@ client_revents (Client * const restrict client)
         if (client->parser_state == PARSER_CONNECT && !client_connect(client))
             continue;
 
+      #ifdef WEIGHTTP_SPLICE
+        r = -1;
+        if (-1 != client->pipefds[2] && 0 == client->request_offset) {
+            r = tee(client->pipefds[2],client->pipefds[1],client->request_size,
+                    SPLICE_F_MOVE | SPLICE_F_NONBLOCK | SPLICE_F_GIFT);
+            if (r == (ssize_t)client->request_size) {
+                r = splice(client->pipefds[0], NULL, client->pfd->fd, NULL,
+                           client->request_size,
+                           SPLICE_F_MOVE | SPLICE_F_NONBLOCK | SPLICE_F_GIFT);
+                if (r != (ssize_t)client->request_size)
+                    /*(must empty pipes for other clients to reuse)*/
+                    client_discard_from_pipe(client->pipefds[0]);
+            }
+            else if (-1 != r) {
+                /*(precautions taken so that partial copy should not happen)*/
+                /*(still, must empty pipes for other clients to reuse)*/
+                client_discard_from_pipe(client->pipefds[0]);
+                r = -1;
+            }
+        }
+        if (-1 == r) /*(fall through to write())*/
+      #endif
         do {
             r = write(client->pfd->fd,
                       client->request+client->request_offset,
