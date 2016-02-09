@@ -340,7 +340,7 @@ static uint8_t client_parse(Client *client, int size) {
 			// look for next \r\n
 			end = strchr(end, '\r');
 			if (!end || *(end+1) != '\n')
-				return client->buffer_offset < 1024 ? 1 : 0;
+				return (!end || *(end+1) == '\0') && client->buffer_offset < 1024 ? 1 : 0;
 
 			if (status_code >= 200 && status_code < 300) {
 				client->worker->stats.req_2xx++;
@@ -364,7 +364,7 @@ static uint8_t client_parse(Client *client, int size) {
 			/* look for Content-Length and Connection header */
 			while (NULL != (end = strchr(&client->buffer[client->parser_offset], '\r'))) {
 				if (*(end+1) != '\n')
-					return client->buffer_offset - client->parser_offset < 1024 ? 1 : 0;
+					return *(end+1) == '\0' && client->buffer_offset - client->parser_offset < 1024 ? 1 : 0;
 
 				if (end == &client->buffer[client->parser_offset]) {
 					/* body reached */
@@ -450,7 +450,7 @@ static uint8_t client_parse(Client *client, int size) {
 							client->chunk_size += 10 + *str - 'a';
 						else {
 							client->chunk_size = -1;
-							return size < 1024 ? 1 : 0;
+							return *str == '\0' && size < 1024 ? 1 : 0;
 						}
 					}
 
