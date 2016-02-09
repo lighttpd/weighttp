@@ -338,7 +338,7 @@ static uint8_t client_parse(Client *client, int size) {
 			}
 
 			// look for next \r\n
-			end = strchr(end, '\r');
+			end = memchr(end, '\r', client->buffer_offset);
 			if (!end || *(end+1) != '\n')
 				return (!end || *(end+1) == '\0') && client->buffer_offset < 1024 ? 1 : 0;
 
@@ -362,7 +362,7 @@ static uint8_t client_parse(Client *client, int size) {
 		case PARSER_HEADER:
 			//printf("parse (HEADER)\n");
 			/* look for Content-Length and Connection header */
-			while (NULL != (end = strchr(&client->buffer[client->parser_offset], '\r'))) {
+			while (NULL != (end = memchr(&client->buffer[client->parser_offset], '\r', client->buffer_offset - client->parser_offset))) {
 				if (*(end+1) != '\n')
 					return *(end+1) == '\0' && client->buffer_offset - client->parser_offset < 1024 ? 1 : 0;
 
@@ -448,22 +448,20 @@ static uint8_t client_parse(Client *client, int size) {
 							client->chunk_size += 10 + *str - 'A';
 						else if (*str >= 'a' && *str <= 'z')
 							client->chunk_size += 10 + *str - 'a';
-						else {
-							client->chunk_size = -1;
-							return *str == '\0' && size < 1024 ? 1 : 0;
-						}
+						else
+							return 0; /*(src < end checked above)*/
 					}
 
 					if (str[0] != '\r') {
-						str = strstr(str, "\r\n");
+						str = memchr(str, '\r', end-str);
 						if (!str) {
 							client->chunk_size = -1;
 							return size < 1024 ? 1 : 0;
 						}
 					}
-					else if (str[1] != '\n') {
+					if (str[1] != '\n') {
 						client->chunk_size = -1;
-						return str[1] == '\0' ? 1 : 0;
+						return str+1 == end ? 1 : 0;
 					}
 					str += 2;
 
