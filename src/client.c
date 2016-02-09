@@ -461,8 +461,10 @@ static uint8_t client_parse(Client *client, int size) {
 							return size < 1024 ? 1 : 0;
 						}
 					}
-					else if (str[1] != '\n')
-						return 0;
+					else if (str[1] != '\n') {
+						client->chunk_size = -1;
+						return str[1] == '\0' ? 1 : 0;
+					}
 					str += 2;
 
 					//printf("---------- chunk size: %"PRIi64", %d read, %d offset, data: '%s'\n", client->chunk_size, size, client->parser_offset, str);
