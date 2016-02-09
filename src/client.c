@@ -337,6 +337,11 @@ static uint8_t client_parse(Client *client, int size) {
 				status_code += *str - '0';
 			}
 
+			// look for next \r\n
+			end = strchr(end, '\r');
+			if (!end || *(end+1) != '\n')
+				return client->buffer_offset < 1024 ? 1 : 0;
+
 			if (status_code >= 200 && status_code < 300) {
 				client->worker->stats.req_2xx++;
 				client->status_success = 1;
@@ -352,11 +357,6 @@ static uint8_t client_parse(Client *client, int size) {
 				return 0;
 			}
 
-			// look for next \r\n
-			end = strchr(end, '\r');
-			if (!end || *(end+1) != '\n')
-				return 0;
-
 			client->parser_offset = end + 2 - client->buffer;
 			client->parser_state = PARSER_HEADER;
 		case PARSER_HEADER:
@@ -364,7 +364,7 @@ static uint8_t client_parse(Client *client, int size) {
 			/* look for Content-Length and Connection header */
 			while (NULL != (end = strchr(&client->buffer[client->parser_offset], '\r'))) {
 				if (*(end+1) != '\n')
-					return 0;
+					return client->buffer_offset - client->parser_offset < 1024 ? 1 : 0;
 
 				if (end == &client->buffer[client->parser_offset]) {
 					/* body reached */
@@ -448,16 +448,27 @@ static uint8_t client_parse(Client *client, int size) {
 							client->chunk_size += 10 + *str - 'A';
 						else if (*str >= 'a' && *str <= 'z')
 							client->chunk_size += 10 + *str - 'a';
-						else
-							return 0;
+						else {
+							client->chunk_size = -1;
+							return size < 1024 ? 1 : 0;
+						}
 					}
 
-					str = strstr(str, "\r\n");
-					if (!str)
+					if (str[0] != '\r') {
+						str = strstr(str, "\r\n");
+						if (!str) {
+							client->chunk_size = -1;
+							return size < 1024 ? 1 : 0;
+						}
+					}
+					else if (str[1] != '\n')
 						return 0;
 					str += 2;
 
 					//printf("---------- chunk size: %"PRIi64", %d read, %d offset, data: '%s'\n", client->chunk_size, size, client->parser_offset, str);
+
+					size -= str - &client->buffer[client->parser_offset];
+					client->parser_offset = str - client->buffer;
 
 					if (client->chunk_size == 0) {
 						/* chunk of size 0 marks end of content body */
@@ -465,9 +476,6 @@ static uint8_t client_parse(Client *client, int size) {
 						client->success = client->status_success ? 1 : 0;
 						return 1;
 					}
-
-					size -= str - &client->buffer[client->parser_offset];
-					client->parser_offset = str - client->buffer;
 				}
 
 				/* consume chunk till chunk_size is reached */
@@ -482,6 +490,9 @@ static uint8_t client_parse(Client *client, int size) {
 				//printf("---------- chunk consuming: %d, received: %"PRIi64" of %"PRIi64", offset: %d\n", consume_max, client->chunk_received, client->chunk_size, client->parser_offset);
 
 				if (client->chunk_received == client->chunk_size) {
+					if (size - consume_max < 2)
+						return 1;
+
 					if (client->buffer[client->parser_offset] != '\r' || client->buffer[client->parser_offset+1] != '\n')
 						return 0;
 
