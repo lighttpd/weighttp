@@ -643,6 +643,13 @@ client_connect (Client * const restrict client)
                 client_perror(client, "setsockopt() SO_RCVBUF");
         }
 
+        if (raddr->ai_family != AF_UNIX) {
+            /*(might not be correct for real clients, but ok for load test)*/
+            struct linger l = { .l_onoff = 1, .l_linger = 0 };
+            if (0 != setsockopt(fd, SOL_SOCKET, SO_LINGER, &l, sizeof(l)))
+                client_perror(client, "setsockopt() SO_LINGER");
+        }
+
         if (NULL != client->laddr) {
             if (0 != bind(fd,client->laddr->ai_addr,client->laddr->ai_addrlen)){
                 client_perror(client, "bind() (local addr)");
