@@ -57,6 +57,12 @@
 #endif
 #endif
 
+#ifndef MSG_DONTWAIT
+#define MSG_DONTWAIT 0
+#endif
+#ifndef MSG_NOSIGNAL
+#define MSG_NOSIGNAL 0
+#endif
 #ifndef SOCK_NONBLOCK
 #define SOCK_NONBLOCK 0
 #endif
@@ -345,7 +351,11 @@ static void
 client_delete (const Client * const restrict client)
 {
     if (-1 != client->pfd->fd)
+      #ifdef _WIN32
+        closesocket(client->pfd->fd);
+      #else
         close(client->pfd->fd);
+      #endif
 }
 
 
@@ -535,7 +545,11 @@ client_reset (Client * const restrict client, const int success)
             client->revents |= POLLIN;
     }
     else {
+      #ifdef _WIN32
+        closesocket(client->pfd->fd);
+      #else
         close(client->pfd->fd);
+      #endif
         client->pfd->fd = -1;
         client->pfd->events = 0;
         /*client->pfd->revents = 0;*/
@@ -1015,8 +1029,9 @@ client_revents (Client * const restrict client)
 
         ssize_t r;
         do {
-            r = read(client->pfd->fd, client->buffer+client->buffer_offset,
-                     sizeof(client->buffer) - client->buffer_offset - 1);
+            r = recv(client->pfd->fd, client->buffer+client->buffer_offset,
+                     sizeof(client->buffer) - client->buffer_offset - 1,
+                     MSG_DONTWAIT);
         } while (__builtin_expect( (-1 == r), 0) && errno == EINTR);
         if (__builtin_expect( (r > 0), 1)) {
             if (r < (ssize_t)(sizeof(client->buffer)-client->buffer_offset-1))
@@ -1120,9 +1135,10 @@ client_revents (Client * const restrict client)
         if (-1 == r) /*(fall through to write())*/
       #endif
         do {
-            r = write(client->pfd->fd,
-                      client->request+client->request_offset,
-                      client->request_size - client->request_offset);
+            r = send(client->pfd->fd,
+                     client->request+client->request_offset,
+                     client->request_size - client->request_offset,
+                     MSG_DONTWAIT | MSG_NOSIGNAL);
         } while (__builtin_expect( (-1 == r), 0) && errno == EINTR);
         if (__builtin_expect( (r > 0), 1)) {
             if (client->request_size == (uint32_t)r
