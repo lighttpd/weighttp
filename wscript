@@ -14,7 +14,7 @@
 import Options
 
 # the following two variables are used by the target "waf dist"
-VERSION='0.3'
+VERSION='0.4'
 APPNAME='weighttp'
 
 # these variables are mandatory ('/' are converted automatically)
