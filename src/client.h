@@ -40,10 +40,11 @@ struct Client {
 	int64_t content_length;
 	uint64_t bytes_received; /* including http header */
 	uint16_t header_size;
+	struct sockaddr *src_addr;
 
 	char buffer[CLIENT_BUFFER_SIZE];
 };
 
-Client *client_new(Worker *worker);
+Client *client_new(Worker *worker, uint32_t id);
 void client_free(Client *client);
 void client_state_machine(Client *client);

@@ -10,9 +10,9 @@
 
 #include "weighttp.h"
 
-Worker *worker_new(uint8_t id, Config *config, uint16_t num_clients, uint64_t num_requests) {
+Worker *worker_new(uint8_t id, Config *config, uint32_t num_clients, uint64_t num_requests) {
 	Worker *worker;
-	uint16_t i;
+	uint32_t i;
 
 	worker = W_MALLOC(Worker, 1);
 	worker->id = id;
@@ -29,7 +29,7 @@ Worker *worker_new(uint8_t id, Config *config, uint16_t num_clients, uint64_t nu
 	worker->clients = W_MALLOC(Client*, num_clients);
 
 	for (i = 0; i < num_clients; i++) {
-		if (NULL == (worker->clients[i] = client_new(worker)))
+		if (NULL == (worker->clients[i] = client_new(worker, i)))
 			return NULL;
 	}
 
@@ -37,7 +37,7 @@ Worker *worker_new(uint8_t id, Config *config, uint16_t num_clients, uint64_t nu
 }
 
 void worker_free(Worker *worker) {
-	uint16_t i;
+	uint32_t i;
 
 	for (i = 0; i < worker->num_clients; i++)
 		client_free(worker->clients[i]);
@@ -47,7 +47,7 @@ void worker_free(Worker *worker) {
 }
 
 void *worker_thread(void* arg) {
-	uint16_t i;
+	uint32_t i;
 	Worker *worker = (Worker*)arg;
 
 	/* start all clients */

@@ -20,6 +20,7 @@ static void show_help(void) {
 	printf("  -k       keep alive            (default: no)\n");
 	printf("  -6       use ipv6              (default: no)\n");
 	printf("  -H str   add header to request\n");
+	printf("  -s addr  add source IP address\n");
 	printf("  -h       show help and exit\n");
 	printf("  -v       show version and exit\n\n");
 	printf("example: weighttpd -n 10000 -c 10 -t 2 -k -H \"User-Agent: foo\" localhost/index.html\n\n");
@@ -70,6 +71,26 @@ static struct addrinfo *resolve_host(char *hostname, uint16_t port, uint8_t use_
 	return res;
 }
 
+static int parse_src_addr(const char *src, struct sockaddr_storage *dst, int use_ipv6) {
+	int result = 0;
+
+	memset(dst, 0, sizeof(struct sockaddr_storage));
+
+	if (use_ipv6) {
+		((struct sockaddr_in6 *)dst)->sin6_family = AF_INET6;
+		((struct sockaddr_in6 *)dst)->sin6_port = 0;
+		result = inet_pton(AF_INET6, src, &(((struct sockaddr_in6 *)dst)->sin6_addr));
+	} else {
+		((struct sockaddr_in *)dst)->sin_family = AF_INET;
+		((struct sockaddr_in *)dst)->sin_port = 0;
+		result = inet_pton(AF_INET, src, &(((struct sockaddr_in *)dst)->sin_addr));
+	}
+	if (result < 0)
+		perror("inet_pton");
+
+	return result == 1;
+}
+
 static char *forge_request(char *url, char keep_alive, char **host, uint16_t *port, char **headers, uint8_t headers_num) {
 	char *c, *end;
 	char *req;
@@ -93,7 +114,7 @@ static char *forge_request(char *url, char keep_alive, char **host, uint16_t *po
 	len = strlen(url);
 
 	if ((c = strchr(url, ':'))) {
-		/* found ':' => host:port */ 
+		/* found ':' => host:port */
 		*host = W_MALLOC(char, c - url + 1);
 		memcpy(*host, url, c - url);
 		(*host)[c - url] = '\0';
@@ -226,7 +247,7 @@ int main(int argc, char *argv[]) {
 	char *host;
 	uint16_t port;
 	uint8_t use_ipv6;
-	uint16_t rest_concur, rest_req;
+	uint32_t rest_concur, rest_req;
 	Stats stats;
 	ev_tstamp duration;
 	int sec, millisec, microsec;
@@ -246,8 +267,10 @@ int main(int argc, char *argv[]) {
 	config.concur_count = 1;
 	config.req_count = 0;
 	config.keep_alive = 0;
+	config.src_addr_count = 0;
+	config.src_addr = NULL;
 
-	while ((opt = getopt(argc, argv, ":hv6kn:t:c:H:")) != -1) {
+	while ((opt = getopt(argc, argv, ":hv6kn:t:c:H:s:")) != -1) {
 		switch (opt) {
 			case 'h':
 				show_help();
@@ -273,6 +296,12 @@ int main(int argc, char *argv[]) {
 				headers = W_REALLOC(headers, char*, headers_num+1);
 				headers[headers_num] = optarg;
 				headers_num++;
+				break;
+			case 's':
+				config.src_addr = W_REALLOC(config.src_addr, struct sockaddr_storage, config.src_addr_count + 1);
+				if (parse_src_addr(optarg, &config.src_addr[config.src_addr_count], use_ipv6)) {
+					config.src_addr_count++;
+				}
 				break;
 			case '?':
 				if ('?' != optopt) W_ERROR("unkown option: -%c\n", optopt);
@@ -316,6 +345,11 @@ int main(int argc, char *argv[]) {
 		show_help();
 		return 1;
 	}
+	if (config.concur_count > 65535 && config.src_addr_count < 1 || config.concur_count / config.src_addr_count > 65535) {
+		W_ERROR("%s", "specify additional source addresses to utilize this many concurrent clients\n");
+		show_help();
+		return 1;
+	}
 
 
 	loop = ev_default_loop(0);
@@ -351,7 +385,7 @@ int main(int argc, char *argv[]) {
 
 	for (i = 0; i < config.thread_count; i++) {
 		uint64_t reqs = config.req_count / config.thread_count;
-		uint16_t concur = config.concur_count / config.thread_count;
+		uint32_t concur = config.concur_count / config.thread_count;
 
 		if (rest_concur) {
 			concur += 1;
@@ -362,7 +396,7 @@ int main(int argc, char *argv[]) {
 			reqs += 1;
 			rest_req -= 1;
 		}
-		printf("spawning thread #%d: %"PRIu16" concurrent requests, %"PRIu64" total requests\n", i+1, concur, reqs);
+		printf("spawning thread #%d: %"PRIu32" concurrent requests, %"PRIu64" total requests\n", i+1, concur, reqs);
 		workers[i] = worker_new(i+1, &config, concur, reqs);
 
 		if (!(workers[i])) {

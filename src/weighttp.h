@@ -27,6 +27,7 @@
 #include <inttypes.h>
 #include <sys/socket.h>
 #include <netdb.h>
+#include <arpa/inet.h>
 
 #include <ev.h>
 #include <pthread.h>
@@ -54,12 +55,14 @@ typedef struct Client Client;
 struct Config {
 	uint64_t req_count;
 	uint8_t thread_count;
-	uint16_t concur_count;
+	uint32_t concur_count;
 	uint8_t keep_alive;
 
 	char *request;
 	uint32_t request_size;
 	struct addrinfo *saddr;
+    uint8_t src_addr_count;
+    struct sockaddr_storage *src_addr;
 };
 
 uint64_t str_to_uint64(char *str);

@@ -54,7 +54,7 @@ static void client_set_events(Client *client, int events) {
 	ev_io_start(loop, watcher);
 }
 
-Client *client_new(Worker *worker) {
+Client *client_new(Worker *worker, uint32_t id) {
 	Client *client;
 
 	client = W_MALLOC(Client, 1);
@@ -69,6 +69,10 @@ Client *client_new(Worker *worker) {
 	client->chunked = 0;
 	client->chunk_size = -1;
 	client->chunk_received = 0;
+	client->src_addr = NULL;
+	if (client->worker->config->src_addr_count > 0) {
+		client->src_addr = (struct sockaddr *)&client->worker->config->src_addr[id % client->worker->config->src_addr_count];
+	}
 
 	return client;
 }
@@ -174,6 +178,18 @@ void client_state_machine(Client *client) {
 				strerror_r(errno, client->buffer, sizeof(client->buffer));
 				W_ERROR("socket() failed: %s (%d)", client->buffer, errno);
 				goto start;
+			}
+
+			if (client->src_addr != NULL) {
+				size_t sa_len = client->src_addr->sa_family == AF_INET ? sizeof(struct sockaddr_in) : sizeof(struct sockaddr_in6);
+				int result = 0;
+				int tries = 10;
+				do {
+					result = bind(r, client->src_addr, sa_len);
+				} while (tries-- > 0 && result < 0 && errno == EADDRINUSE);
+				if (result < 0) {
+					perror("bind");
+				}
 			}
 
 			/* set non-blocking */
