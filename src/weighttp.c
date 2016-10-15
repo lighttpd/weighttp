@@ -308,6 +308,10 @@ struct Config {
     struct addrinfo laddr;
     struct sockaddr_storage raddr_storage;
     struct sockaddr_storage laddr_storage;
+    struct laddrs {
+        struct addrinfo **addrs;
+        int num;
+    } laddrs;
 };
 
 
@@ -325,7 +329,9 @@ client_init (Worker * const restrict worker,
 
     client->stats = &worker->stats;
     client->raddr = &worker->raddr;
-    client->laddr = (0 != worker->laddr.ai_addrlen) ? &worker->laddr : NULL;
+    client->laddr = config->laddrs.num > 0
+                  ? config->laddrs.addrs[(i % config->laddrs.num)]
+                  : (0 != worker->laddr.ai_addrlen) ? &worker->laddr : NULL;
     client->config_keepalive = config->keep_alive;
     client->pipeline_max     = config->pipeline_max;
     client->tcp_fastopen     = config->tcp_fastopen;
@@ -496,6 +502,12 @@ wconfs_delete (const Config * const restrict config)
     if (config->request < config->buf
         || config->buf+sizeof(config->buf) <= config->request)
         free(config->request);
+
+    if (config->laddrs.num > 0) {
+        for (int i = 0; i < config->laddrs.num; ++i)
+            freeaddrinfo(config->laddrs.addrs[i]);
+        free(config->laddrs.addrs);
+    }
 
   #ifdef WEIGHTTP_SPLICE
     if (-1 != config->reqpipe) close(config->reqpipe);
@@ -1311,7 +1323,7 @@ config_perror (const char * const restrict errfmt, ...)
 typedef struct config_params {
   const char *method;
   const char *uri;
-  const char *laddrstr;
+        char *laddrstr;
   int use_ipv6;
   int headers_num;
   int cookies_num;
@@ -1347,6 +1359,45 @@ config_laddr (Config * const restrict config,
       memcpy(&config->laddr_storage, res->ai_addr, res->ai_addrlen);
 
     freeaddrinfo(res);
+    return 1;
+}
+
+
+__attribute_cold__
+__attribute_nonnull__
+static int
+config_laddrs (Config * const restrict config,
+               char * const restrict laddrstr)
+{
+    char *s;
+    int num = 1;
+    for (s = laddrstr; NULL != (s = strchr(s, ',')); s = s+1) ++num;
+    if (1 == num) return config_laddr(config, laddrstr);
+
+    struct addrinfo hints, **res;
+    memset(&hints, 0, sizeof(hints));
+    /*hints.ai_flags |= AI_NUMERICHOST;*/
+    hints.ai_family   = config->raddr.ai_family;
+    hints.ai_socktype = SOCK_STREAM;
+
+    config->laddrs.num = num;
+    config->laddrs.addrs = res =
+      (struct addrinfo **)calloc((size_t)num, sizeof(struct addrinfo *));
+
+    s = laddrstr;
+    for (int i = 0; i < num; ++i, ++res) {
+        char *e = strchr(s, ',');
+        if (NULL != e) *e = '\0';
+
+        *res = NULL;
+        if (0 != getaddrinfo(s, NULL, &hints, res) || NULL == *res)
+            return 0; /*(leave laddrstr modified so last addr is one w/ error)*/
+
+        if (NULL == e) break;
+        *e = ',';
+        s = e+1;
+    }
+
     return 1;
 }
 
@@ -1899,9 +1950,42 @@ weighttp_setup (Config * const restrict config, const int argc, char *argv[])
     config_request(config, &params);
 
     config->laddr.ai_addrlen = 0;
-    if (params.laddrstr && !config_laddr(config, params.laddrstr))
+    config->laddrs.addrs = NULL;
+    config->laddrs.num = 0;
+    if (params.laddrstr && !config_laddrs(config, params.laddrstr))
         config_error("could not resolve local bind address: %s",
                      params.laddrstr);
+
+    if (config->concur_count > 32768 && config->raddr.ai_family != AF_UNIX) {
+        int need = config->concur_count;
+        int avail = 32768;
+        int fd = open("/proc/sys/net/ipv4/ip_local_port_range",
+                      O_RDONLY|O_BINARY|O_LARGEFILE|O_NONBLOCK, 0);
+        if (fd >= 0) {
+            char buf[32];
+            ssize_t rd = read(fd, buf, sizeof(buf));
+            if (rd >= 3 && rd < (ssize_t)sizeof(buf)) {
+                long lb, ub;
+                char *e;
+                buf[rd] = '\0';
+                lb = strtoul(buf, &e, 10);
+                if (lb > 0 && lb < USHRT_MAX && *e) {
+                    ub = strtoul(e, &e, 10);
+                    if (ub > 0 && ub <= USHRT_MAX && (*e=='\0' || *e=='\n')) {
+                        if (lb <= ub)
+                            avail = ub - lb + 1;
+                    }
+                }
+            }
+            close(fd);
+        }
+        if (config->laddrs.num)
+            need = (need + config->laddrs.num - 1) / config->laddrs.num;
+        if (need > avail)
+            config_error("not enough local ports for concurrency\n"
+                         "Reduce concur or provide -B addr,addr,addr "
+                         "to specify multiple local bind addrs");
+    }
 
     /* (see [RFC7413] 4.1.3. Client Cookie Handling) */
     if ((config->proxy && config->proxy[0] == '/')
