@@ -427,8 +427,8 @@ static uint8_t client_parse(Client *client, int size) {
 				int consume_max;
 
 				str = &client->buffer[client->parser_offset];
-				/*printf("parsing chunk: '%s'\n(%"PRIi64" received, %"PRIi64" size, %d parser offset)\n",
-					str, client->chunk_received, client->chunk_size, client->parser_offset
+				/*printf("parsing chunk: '%s'\n(%"PRIi64" received, %"PRIi64" size, %d parser offset, %d size)\n",
+					str, client->chunk_received, client->chunk_size, client->parser_offset, size
 				);*/
 
 				if (client->chunk_size == -1) {
@@ -448,6 +448,8 @@ static uint8_t client_parse(Client *client, int size) {
 							client->chunk_size += 10 + *str - 'A';
 						else if (*str >= 'a' && *str <= 'z')
 							client->chunk_size += 10 + *str - 'a';
+						else if (!str)
+							return (size > 64) ? 0 : 1; /* wait for more data, but only for a maximum line length of 64 */
 						else
 							return 0; /*(src < end checked above)*/
 					}
