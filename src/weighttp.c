@@ -84,7 +84,7 @@
 #define __attribute_noinline__   __attribute__((__noinline__))
 #endif
 #ifndef __attribute_nonnull__
-#define __attribute_nonnull__    __attribute__((__nonnull__))
+#define __attribute_nonnull__(params)  __attribute__((__nonnull__ params))
 #endif
 #ifndef __attribute_noreturn__
 #define __attribute_noreturn__   __attribute__((__noreturn__))
@@ -109,7 +109,7 @@
 #define __attribute_noinline__
 #endif
 #ifndef __attribute_nonnull__
-#define __attribute_nonnull__
+#define __attribute_nonnull__(params)
 #endif
 #ifndef __attribute_noreturn__
 #define __attribute_noreturn__
@@ -316,7 +316,7 @@ struct Config {
 
 
 __attribute_cold__
-__attribute_nonnull__
+__attribute_nonnull__()
 static void
 client_init (Worker * const restrict worker,
              const Config * const restrict config,
@@ -352,7 +352,7 @@ client_init (Worker * const restrict worker,
 
 
 __attribute_cold__
-__attribute_nonnull__
+__attribute_nonnull__()
 static void
 client_delete (const Client * const restrict client)
 {
@@ -366,7 +366,7 @@ client_delete (const Client * const restrict client)
 
 
 __attribute_cold__
-__attribute_nonnull__
+__attribute_nonnull__()
 __attribute_noinline__
 static void
 worker_init (Worker * const restrict worker,
@@ -401,7 +401,7 @@ worker_init (Worker * const restrict worker,
 
 
 __attribute_cold__
-__attribute_nonnull__
+__attribute_nonnull__()
 __attribute_noinline__
 static void
 worker_delete (Worker * const restrict worker,
@@ -434,7 +434,7 @@ worker_delete (Worker * const restrict worker,
 
 __attribute_cold__
 __attribute_noinline__
-__attribute_nonnull__
+__attribute_nonnull__()
 static void
 wconfs_init (Config * const restrict config)
 {
@@ -494,7 +494,7 @@ wconfs_init (Config * const restrict config)
 
 __attribute_cold__
 __attribute_noinline__
-__attribute_nonnull__
+__attribute_nonnull__()
 static void
 wconfs_delete (const Config * const restrict config)
 {
@@ -516,7 +516,7 @@ wconfs_delete (const Config * const restrict config)
 
 
 __attribute_hot__
-__attribute_nonnull__
+__attribute_nonnull__()
 static void
 client_reset (Client * const restrict client, const int success)
 {
@@ -572,7 +572,7 @@ client_reset (Client * const restrict client, const int success)
 
 __attribute_cold__
 __attribute_noinline__
-__attribute_nonnull__
+__attribute_nonnull__()
 static void
 client_error (Client * const restrict client)
 {
@@ -592,7 +592,7 @@ client_error (Client * const restrict client)
 
 __attribute_cold__
 __attribute_noinline__
-__attribute_nonnull__
+__attribute_nonnull__()
 static void
 client_perror (Client * const restrict client, const char * const restrict tag)
 {
@@ -610,7 +610,7 @@ client_perror (Client * const restrict client, const char * const restrict tag)
 }
 
 
-__attribute_nonnull__
+__attribute_nonnull__()
 static void
 client_connected (Client * const restrict client)
 {
@@ -626,7 +626,7 @@ client_connected (Client * const restrict client)
 
 
 __attribute_noinline__
-__attribute_nonnull__
+__attribute_nonnull__()
 static int
 client_connect (Client * const restrict client)
 {
@@ -748,7 +748,7 @@ client_connect (Client * const restrict client)
 }
 
 
-__attribute_nonnull__
+__attribute_nonnull__()
 static int
 client_parse_chunks (Client * const restrict client)
 {
@@ -835,7 +835,7 @@ client_parse_chunks (Client * const restrict client)
 
 
 __attribute_hot__
-__attribute_nonnull__
+__attribute_nonnull__()
 __attribute_pure__
 static uint64_t
 client_parse_uint64 (const char * const restrict str)
@@ -855,7 +855,7 @@ client_parse_uint64 (const char * const restrict str)
 
 __attribute_hot__
 __attribute_noinline__
-__attribute_nonnull__
+__attribute_nonnull__()
 static int
 client_parse (Client * const restrict client)
 {
@@ -1030,7 +1030,7 @@ client_discard_from_pipe (const int fd)
 #endif
 
 
-__attribute_nonnull__
+__attribute_nonnull__()
 static void
 client_revents (Client * const restrict client)
 {
@@ -1193,7 +1193,7 @@ client_revents (Client * const restrict client)
 }
 
 
-__attribute_nonnull__
+__attribute_nonnull__()
 static void *
 worker_thread (void * const arg)
 {
@@ -1258,7 +1258,7 @@ worker_thread (void * const arg)
 
 __attribute_cold__
 __attribute_noinline__
-__attribute_nonnull__
+__attribute_nonnull__()
 static void
 config_error_diagnostic (const char * const restrict errfmt,
                          const int perr, va_list ap)
@@ -1291,7 +1291,7 @@ config_error_diagnostic (const char * const restrict errfmt,
 __attribute_cold__
 __attribute_format__((__printf__, 1, 2))
 __attribute_noinline__
-__attribute_nonnull__
+__attribute_nonnull__()
 __attribute_noreturn__
 static void
 config_error (const char * const restrict errfmt, ...)
@@ -1307,7 +1307,7 @@ config_error (const char * const restrict errfmt, ...)
 __attribute_cold__
 __attribute_format__((__printf__, 1, 2))
 __attribute_noinline__
-__attribute_nonnull__
+__attribute_nonnull__()
 __attribute_noreturn__
 static void
 config_perror (const char * const restrict errfmt, ...)
@@ -1337,7 +1337,7 @@ typedef struct config_params {
 
 
 __attribute_cold__
-__attribute_nonnull__
+__attribute_nonnull__()
 static int
 config_laddr (Config * const restrict config,
               const char * const restrict laddrstr)
@@ -1364,7 +1364,7 @@ config_laddr (Config * const restrict config,
 
 
 __attribute_cold__
-__attribute_nonnull__
+__attribute_nonnull__()
 static int
 config_laddrs (Config * const restrict config,
                char * const restrict laddrstr)
@@ -1403,7 +1403,7 @@ config_laddrs (Config * const restrict config,
 
 
 __attribute_cold__
-__attribute_nonnull__
+__attribute_nonnull__()
 static void
 config_raddr (Config * const restrict config,
               const char * restrict hostname, uint16_t port, const int use_ipv6)
@@ -1485,7 +1485,7 @@ config_raddr (Config * const restrict config,
 
 
 __attribute_cold__
-__attribute_nonnull__
+__attribute_nonnull__()
 static int
 config_base64_encode_pad (char * const restrict dst, const size_t dstsz,
                           const char * const restrict ssrc)
@@ -1534,7 +1534,7 @@ config_base64_encode_pad (char * const restrict dst, const size_t dstsz,
 
 
 __attribute_cold__
-__attribute_nonnull__
+__attribute_nonnull__()
 static void
 config_request (Config * const restrict config,
                 const config_params * const restrict params)
@@ -1793,7 +1793,7 @@ config_request (Config * const restrict config,
 
 __attribute_cold__
 __attribute_noinline__
-__attribute_nonnull__
+__attribute_nonnull__()
 static void
 weighttp_setup (Config * const restrict config, const int argc, char *argv[])
 {
@@ -1996,7 +1996,7 @@ weighttp_setup (Config * const restrict config, const int argc, char *argv[])
 
 __attribute_cold__
 __attribute_noinline__
-__attribute_nonnull__
+__attribute_nonnull__()
 static void
 weighttp_report (const Config * const restrict config)
 {
