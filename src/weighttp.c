@@ -1776,7 +1776,7 @@ config_request (Config * const restrict config,
     if (-1 != fd && 0 != fsize) {
         /*(not checking if file changed between fstat() and read())*/
         /*(not using mmap() since we expect benchmark test file to be smallish
-         * and able to fit in memory, or */
+         * and able to fit in memory) */
         config->request = malloc(config->request_size);
         memcpy(config->request, req, (size_t)offset);
         off_t reqsz = offset;
@@ -2000,7 +2000,7 @@ __attribute_nonnull__()
 static void
 weighttp_report (const Config * const restrict config)
 {
-    /* collect worker stats and releaes resources */
+    /* collect worker stats and release resources */
     Stats stats;
     memset(&stats, 0, sizeof(stats));
     for (int i = 0; i < config->thread_count; ++i) {
