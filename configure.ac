@@ -1,10 +1,10 @@
 # -*- Autoconf -*-
 # Process this file with autoconf to produce a configure script.
 
-AC_PREREQ(2.61)
+AC_PREREQ([2.72])
 AC_INIT([weighttp],[0.4])
 AC_CONFIG_SRCDIR([src/weighttp.c])
-AC_CONFIG_HEADER([src/config.h])
+AC_CONFIG_HEADERS([src/config.h])
 
 AM_INIT_AUTOMAKE([-Wall -Werror foreign dist-xz no-dist-gzip])
 
@@ -54,7 +54,7 @@ TRY_CFLAGS([-g2])
 TRY_CFLAGS([-O2])
 
 AC_ARG_ENABLE(extra-warnings,
- AC_HELP_STRING([--enable-extra-warnings],[enable extra warnings (gcc specific)]),
+ AS_HELP_STRING([--enable-extra-warnings],[enable extra warnings (gcc specific)]),
  [case "${enableval}" in
    yes) extrawarnings=true ;;
     no) extrawarnings=false ;;
