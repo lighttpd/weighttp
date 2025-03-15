@@ -3,8 +3,7 @@ TODO
 
 - timeouts, time limits, timing statistics
 - TLS support
-- consider employing bpoll event framework to replace poll()
-  (https://github.com/gstrauss/bsock)
+- HTTP/2 client support
 
 
 Notes
@@ -15,6 +14,7 @@ Notes
   (ready events) each poll().  However, for a huge number of concurrent
   connections (e.g. thousands), a more advanced event framework (such as
   bpoll, libuv, libev, libevent) might be more performant.
+  (bpoll is part of https://github.com/gstrauss/bsock)
 
 - Using tcmalloc did not appear to measurably improve performance.  YMMV.
     export LD_PRELOAD=/usr/lib64/libtcmalloc.so.4
