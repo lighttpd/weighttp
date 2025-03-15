@@ -652,11 +652,7 @@ client_connect (Client * const restrict client)
             return 0;
         }
 
-        if (1 == client->pipeline_max && raddr->ai_family != AF_UNIX) {
-            /* disable Nagle if not pipelining requests and not AF_UNIX
-             * (pipelining enables keepalive, but if not pipelining but
-             *  keepalive enabled, still want to disable Nagle to reduce latency
-             *  when sending next keepalive request after receiving response) */
+        if (raddr->ai_family != AF_UNIX) {
             opt = 1;
             setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &opt, sizeof(opt));
         }
