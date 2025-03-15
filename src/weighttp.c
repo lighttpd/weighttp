@@ -744,6 +744,28 @@ client_connect (Client * const restrict client)
 }
 
 
+__attribute_cold__
+__attribute_noinline__
+__attribute_nonnull__()
+static int
+client_parse_pending_more_data (Client * const restrict client)
+{
+    /* check if buffer is full (sizeof(client->buffer)-1 for added '\0').
+     * PARSER_BODY handling consumes data, so buffer full might happen
+     * only when parsing response header line or chunked header line.
+     * If buffer is full, then line is *way* too long. */
+    if (__builtin_expect(
+          (client->buffer_offset == sizeof(client->buffer)-1), 0)) {
+        if (__builtin_expect( (0 == client->parser_offset), 0)) {
+            client_error(client); /* e.g. response header too big */
+            return 0;
+        }
+    }
+
+    return 1;
+}
+
+
 __attribute_nonnull__()
 static int
 client_parse_chunks (Client * const restrict client)
@@ -757,7 +779,7 @@ client_parse_chunks (Client * const restrict client)
             char *end =
               memchr(str, '\n', client->buffer_offset - client->parser_offset);
             if (!end) /* partial line */
-                return 1;
+                return client_parse_pending_more_data(client);
             ++end;
 
             /* assume server sends valid chunked header
@@ -784,8 +806,9 @@ client_parse_chunks (Client * const restrict client)
                  * check for final "\r\n" ending response
                  * (not handling trailers if user supplied -H "TE: trailers") */
                 if (end + 2 > client->buffer + client->buffer_offset) {
+                    /* final "\r\n" not yet received */
                     client->chunk_size = -1;
-                    return 1; /* final "\r\n" not yet received */
+                    return client_parse_pending_more_data(client);
                 }
                 if (end[0] == '\r' && end[1] == '\n')
                     client->stats->bytes_headers += 2;
@@ -879,7 +902,7 @@ client_parse (Client * const restrict client)
             }
         }
         else /*(partial response line; incomplete)*/
-            return 1;
+            return client_parse_pending_more_data(client);
 
         client->content_length = -1;
         client->chunked = 0;
@@ -918,7 +941,7 @@ client_parse (Client * const restrict client)
             end =
               memchr(str, '\n', client->buffer_offset - client->parser_offset);
             if (NULL == end)
-                return 1;
+                return client_parse_pending_more_data(client);
             len = (uint32_t)(end - str + 1);
             client->stats->bytes_headers += len;
             client->parser_offset += len;
@@ -1035,6 +1058,15 @@ client_revents (Client * const restrict client)
         if (client->buffer_offset && !client_parse(client))
             continue;
 
+        /* adjust client recv buffer if nearly full (e.g. pipelined responses)*/
+        if (client->parser_offset
+            && __builtin_expect(
+                (sizeof(client->buffer) - client->buffer_offset < 1024), 0)) {
+            memmove(client->buffer, client->buffer + client->parser_offset,
+                    (client->buffer_offset -= client->parser_offset) + 1);
+            client->parser_offset = 0;
+        }
+
         ssize_t r;
         do {
             r = recv(client->pfd->fd, client->buffer+client->buffer_offset,
@@ -1049,25 +1081,7 @@ client_revents (Client * const restrict client)
 
             if (!client_parse(client))
                 continue;
-
-            /* PARSER_BODY handling consumes data, so buffer full might happen
-             * only when parsing response header line or chunked header line.
-             * If buffer is full, then line is *way* too long.  However, if
-             * client->parser_offset is non-zero, then move data to beginning
-             * of buffer and attempt to read() more */
-            if (__builtin_expect(
-                  (client->buffer_offset == sizeof(client->buffer)-1), 0)) {
-                if (0 == client->parser_offset) {
-                    client_error(client); /* response header too big */
-                    break;
-                }
-                else {
-                    memmove(client->buffer,client->buffer+client->parser_offset,
-                            client->buffer_offset - client->parser_offset + 1);
-                    client->buffer_offset -= client->parser_offset;
-                    client->parser_offset = 0;
-                }
-            }
+            /*(also, continue)*/
         }
         else {
             if (-1 == r) { /* error */
