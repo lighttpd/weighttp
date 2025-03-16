@@ -15,6 +15,9 @@
 #ifndef _GNU_SOURCE
 #define _GNU_SOURCE 1
 #endif
+#ifndef _DEFAULT_SOURCE
+#define _DEFAULT_SOURCE
+#endif
 
 #include <sys/types.h>
 #include <sys/socket.h>/* socket() connect() SOCK_NONBLOCK sockaddr_storage */
@@ -72,6 +75,10 @@
 #endif
 
 
+#ifndef __has_attribute
+#define __has_attribute(x) 0
+#endif
+
 /*(oversimplified; these attributes are supported by some other compilers)*/
 #if defined(__GNUC__) || defined(__clang__)
 #ifndef __attribute_cold__
@@ -119,6 +126,15 @@
 #endif
 #ifndef __attribute_format__
 #define __attribute_format__(x)
+#endif
+#endif
+
+#ifndef __attribute_fallthrough__
+#if __has_attribute(fallthrough)
+ /*|| __GNUC_PREREQ(7,0)*/
+#define __attribute_fallthrough__  __attribute__((__fallthrough__));
+#else
+#define __attribute_fallthrough__  /* fall through */
 #endif
 #endif
 
@@ -931,7 +947,8 @@ client_parse (Client * const restrict client)
         client->stats->bytes_headers += len;
         client->parser_offset += len;
         client->parser_state = PARSER_HEADER;
-        /* fall through */
+
+        __attribute_fallthrough__
 
       case PARSER_HEADER:
         /* minimally peek at Content-Length, Connection, Transfer-Encoding */
@@ -1000,7 +1017,8 @@ client_parse (Client * const restrict client)
             client->content_length = 0;
         else if (!client->chunked && -1 == client->content_length)
             client->keepalive = 0;
-        /* fall through */
+
+        __attribute_fallthrough__
 
       case PARSER_BODY:
         /* consume and discard response body */
@@ -1912,10 +1930,10 @@ weighttp_setup (Config * const restrict config, const int argc, char *argv[])
           case '?':
             if ('?' != optopt)
                 config_error("unknown option: -%c", optopt);
-            /* fall through */
+            __attribute_fallthrough__
           case 'h':
             opt_show_help = 1;
-            /* fall through */
+            __attribute_fallthrough__
           case 'V':
             opt_show_version = 1;
             break;
