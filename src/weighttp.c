@@ -2083,9 +2083,9 @@ weighttp_report (const Config * const restrict config)
            "  },\n",
            stats.req_2xx, stats.req_3xx, stats.req_4xx, stats.req_5xx);
     printf("  \"traffic\": {\n"
-           "    \"bytes_total\":   %12."PRIu64",\n"
-           "    \"bytes_headers\": %12."PRIu64",\n"
-           "    \"bytes_body\":    %12."PRIu64"\n"
+           "    \"bytes_total\":   %12.1"PRIu64",\n"
+           "    \"bytes_headers\": %12.1"PRIu64",\n"
+           "    \"bytes_body\":    %12.1"PRIu64"\n"
            "  }\n"
            "}\n",
            stats.bytes_total, stats.bytes_headers,
