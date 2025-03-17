@@ -29,7 +29,7 @@
 #include <limits.h>    /* USHRT_MAX */
 #include <locale.h>    /* setlocale() */
 #include <netdb.h>     /* getaddrinfo() freeaddrinfo() */
-#include <poll.h>      /* poll() POLLIN POLLOUT POLLERR POLLHUP */
+#include <poll.h>      /* poll() POLLIN POLLOUT POLLERR POLLHUP POLLRDHUP */
 #include <pthread.h>   /* pthread_create() pthread_join() */
 #include <stdarg.h>    /* va_start() va_end() vfprintf() */
 #include <stdio.h>
@@ -39,6 +39,10 @@
 #include <string.h>
 #include <strings.h>   /* strcasecmp() strncasecmp() */
 #include <unistd.h>    /* read() write() close() getopt() optarg optind optopt*/
+
+#ifndef POLLRDHUP
+#define POLLRDHUP 0
+#endif
 
 #ifdef _WIN32
 #include <winsock2.h>
@@ -638,6 +642,8 @@ client_connected (Client * const restrict client)
     client->keepalive = client->config_keepalive;
     client->keptalive = 0;
     /*client->success = 0;*/
+
+    client->pfd->events |= POLLIN | POLLRDHUP;
 }
 
 
@@ -705,7 +711,6 @@ client_connect (Client * const restrict client)
             if (wr > 0) {
                 client_connected(client);
                 if (client->request_size == (uint32_t)wr) {
-                    client->pfd->events |= POLLIN;
                     if (++client->pipelined == client->pipeline_max) {
                         client->revents &= ~POLLOUT;
                         client->pfd->events &= ~POLLOUT;
@@ -1071,7 +1076,7 @@ __attribute_nonnull__()
 static void
 client_revents (Client * const restrict client)
 {
-    while (client->revents & POLLIN) {
+    while (client->revents & (POLLIN|POLLRDHUP)) {
         /* parse pipelined responses */
         if (client->buffer_offset && !client_parse(client))
             continue;
@@ -1109,7 +1114,6 @@ client_revents (Client * const restrict client)
                    #endif
                    ) {
                     client->revents &= ~POLLIN;
-                    client->pfd->events |= POLLIN;
                     break;
                 }
                 else
@@ -1186,9 +1190,8 @@ client_revents (Client * const restrict client)
         if (__builtin_expect( (r > 0), 1)) {
             if (client->request_size == (uint32_t)r
                 || client->request_size==(client->request_offset+=(uint32_t)r)){
-                /* request sent; register read interest for response */
+                /* request sent */
                 client->request_offset = 0;
-                client->pfd->events |= POLLIN;
                 if (++client->pipelined < client->pipeline_max)
                     continue;
                 else {
