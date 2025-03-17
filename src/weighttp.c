@@ -1161,9 +1161,12 @@ client_revents (Client * const restrict client)
                 r = splice(client->pipefds[0], NULL, client->pfd->fd, NULL,
                            client->request_size,
                            SPLICE_F_MOVE | SPLICE_F_NONBLOCK | SPLICE_F_GIFT);
-                if (r != (ssize_t)client->request_size)
+                if (r != (ssize_t)client->request_size) {
+                    if (r > 0)
+                        client->request_offset = (uint32_t)r;
                     /*(must empty pipes for other clients to reuse)*/
                     client_discard_from_pipe(client->pipefds[0]);
+                }
             }
             else if (-1 != r) {
                 /*(precautions taken so that partial copy should not happen)*/
@@ -1194,6 +1197,7 @@ client_revents (Client * const restrict client)
                 }
             }
             else {
+                client->request_offset += (uint32_t)r;
                 client->revents &= ~POLLOUT; /*(trigger write() loop exit)*/
                 client->pfd->events |= POLLOUT;
             }
