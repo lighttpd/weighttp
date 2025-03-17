@@ -259,6 +259,7 @@ struct Client {
     int tcp_fastopen;
     int http_head;
     int so_bufsz;
+    int req_redo;
 
   #ifdef WEIGHTTP_SPLICE
     int pipefds[3];
@@ -542,12 +543,13 @@ client_reset (Client * const restrict client, const int success)
 {
     /* update worker stats */
     Stats * const restrict stats = client->stats;
-
-    ++stats->req_done;
-    if (__builtin_expect( (0 != success), 1))
-        ++stats->req_success;
-    else
-        ++stats->req_failed;
+    if (__builtin_expect( (!client->req_redo), 1)) {
+        ++stats->req_done;
+        if (__builtin_expect( (0 != success), 1))
+            ++stats->req_success;
+        else
+            ++stats->req_failed;
+    }
 
     client->revents = (stats->req_started < stats->req_todo) ? POLLOUT : 0;
     if (client->revents && client->keepalive) {
@@ -596,7 +598,8 @@ __attribute_nonnull__()
 static void
 client_error (Client * const restrict client)
 {
-    ++client->stats->req_error;
+    if (!client->req_redo)
+        ++client->stats->req_error;
     if (client->parser_state != PARSER_BODY) {
         /*(might include subsequent responses to pipelined requests, but
          * some sort of invalid response received if client_error() called)*/
@@ -657,7 +660,10 @@ client_connect (Client * const restrict client)
     int opt;
 
     if (-1 == fd) {
-        ++client->stats->req_started;
+        if (__builtin_expect( (!client->req_redo), 1))
+            ++client->stats->req_started;
+        else
+            client->req_redo = 0;
 
         do {
             fd = socket(raddr->ai_family,raddr->ai_socktype,raddr->ai_protocol);
@@ -1131,14 +1137,8 @@ client_revents (Client * const restrict client)
                         && client->parser_state == PARSER_START
                         && 0 == client->buffer_offset) {
                         /* (server might still read and discard request,
-                         *  but has initiated connection close)
-                         * (decrement counters to redo request, including
-                         *  decrementing counters that will be incremented
-                         *  by call to client_error() directly below) */
-                        --client->stats->req_started;
-                        --client->stats->req_failed;
-                        --client->stats->req_error;
-                        --client->stats->req_done;
+                         *  but has initiated connection close) */
+                        client->req_redo = 1;
                     }
                     client_error(client);
                 }
