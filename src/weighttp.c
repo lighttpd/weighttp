@@ -595,7 +595,7 @@ client_reset (Client * const restrict client, const int success)
 __attribute_cold__
 __attribute_noinline__
 __attribute_nonnull__()
-static void
+static int
 client_error (Client * const restrict client)
 {
     if (!client->req_redo)
@@ -610,13 +610,14 @@ client_error (Client * const restrict client)
     }
     client->keepalive = 0;
     client_reset(client, 0);
+    return 0;
 }
 
 
 __attribute_cold__
 __attribute_noinline__
 __attribute_nonnull__()
-static void
+static int
 client_perror (Client * const restrict client, const char * const restrict tag)
 {
     const int errnum = errno;
@@ -629,7 +630,7 @@ client_perror (Client * const restrict client, const char * const restrict tag)
     strerror_r(errnum, client->buffer, sizeof(client->buffer));
   #endif
     fprintf(stderr, "error: %s failed: (%d) %s\n", tag, errnum, errstr);
-    client_error(client);
+    return client_error(client);
 }
 
 
@@ -668,17 +669,13 @@ client_connect (Client * const restrict client)
         do {
             fd = socket(raddr->ai_family,raddr->ai_socktype,raddr->ai_protocol);
         } while (__builtin_expect( (-1 == fd), 0) && errno == EINTR);
+        if (fd < 0)
+            return client_perror(client, "socket()");
 
-        if (fd >= 0) {
-          #if !SOCK_NONBLOCK
-            fcntl(fd, F_SETFL, O_NONBLOCK | O_RDWR); /* set non-blocking */
-          #endif
-            client->pfd->fd = fd;
-        }
-        else {
-            client_perror(client, "socket()");
-            return 0;
-        }
+      #if !SOCK_NONBLOCK
+        fcntl(fd, F_SETFL, O_NONBLOCK | O_RDWR); /* set non-blocking */
+      #endif
+        client->pfd->fd = fd;
 
         if (raddr->ai_family != AF_UNIX) {
             opt = 1;
@@ -700,12 +697,9 @@ client_connect (Client * const restrict client)
                 client_perror(client, "setsockopt() SO_LINGER");
         }
 
-        if (NULL != client->laddr) {
-            if (0 != bind(fd,client->laddr->ai_addr,client->laddr->ai_addrlen)){
-                client_perror(client, "bind() (local addr)");
-                return 0;
-            }
-        }
+        if (NULL != client->laddr
+            && 0 != bind(fd, client->laddr->ai_addr, client->laddr->ai_addrlen))
+            return client_perror(client, "bind() (local addr)");
 
         int rc;
       #ifdef TCP_FASTOPEN
@@ -750,8 +744,7 @@ client_connect (Client * const restrict client)
                 client->pfd->events |= POLLOUT;
                 return 0;
               default:
-                client_perror(client, "connect()");
-                return 0;
+                return client_perror(client, "connect()");
             }
         }
     }
@@ -759,9 +752,8 @@ client_connect (Client * const restrict client)
         opt = 0;
         socklen_t optlen = sizeof(opt);
         if (0 != getsockopt(fd,SOL_SOCKET,SO_ERROR,&opt,&optlen) || 0 != opt) {
-            if (0 != opt) errno = opt;
-            client_perror(client, "connect() getsockopt()");
-            return 0; /* error connecting */
+            if (0 != opt) errno = opt; /* error connecting */
+            return client_perror(client, "connect() getsockopt()");
         }
     }
 
@@ -783,10 +775,8 @@ client_parse_pending_more_data (Client * const restrict client)
      * If buffer is full, then line is *way* too long. */
     if (__builtin_expect(
           (client->buffer_offset == sizeof(client->buffer)-1), 0)) {
-        if (__builtin_expect( (0 == client->parser_offset), 0)) {
-            client_error(client); /* e.g. response header too big */
-            return 0;
-        }
+        if (__builtin_expect( (0 == client->parser_offset), 0))
+            return client_error(client); /* e.g. response header too big */
     }
 
     return 1;
@@ -823,8 +813,7 @@ client_parse_chunks (Client * const restrict client)
                 else {
                     if (c=='\r' || c=='\n' || c==' ' || c=='\t' || c==';')
                         break;
-                    client_error(client);
-                    return 0;
+                    return client_error(client);
                 }
             } while (*++str != '\r' && *str != '\n');
 
@@ -858,10 +847,8 @@ client_parse_chunks (Client * const restrict client)
             client->chunk_received += chunk_remain;
             client->parser_offset += chunk_remain;
 
-            if (client->buffer[client->parser_offset-1] != '\n') {
-                client_error(client);
-                return 0;
-            }
+            if (client->buffer[client->parser_offset-1] != '\n')
+                return client_error(client);
 
             /* got whole chunk, next! */
             client->chunk_size = -1;
@@ -923,10 +910,8 @@ client_parse (Client * const restrict client)
                      client->buffer_offset - client->parser_offset);
         if (NULL != end) {
             len = (uint32_t)(end - client->buffer - client->parser_offset + 1);
-            if (len < sizeof("HTTP/1.1 200\r\n")-1) {
-                client_error(client);
-                return 0;
-            }
+            if (len < sizeof("HTTP/1.1 200\r\n")-1)
+                return client_error(client);
         }
         else /*(partial response line; incomplete)*/
             return client_parse_pending_more_data(client);
@@ -952,8 +937,7 @@ client_parse (Client * const restrict client)
             break;
           default:
             /* invalid status code */
-            client_error(client);
-            return 0;
+            return client_error(client);
         }
         client->stats->bytes_headers += len;
         client->parser_offset += len;
