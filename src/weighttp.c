@@ -536,6 +536,19 @@ wconfs_delete (const Config * const restrict config)
 }
 
 
+__attribute_cold__
+__attribute_nonnull__()
+static void
+client_buffer_shift (Client * const restrict client)
+{
+    /*(caller should check client->parser_offset != 0 prior to call)*/
+    /*(+1 for trailing '\0' added to buffer by weighttp)*/
+    memmove(client->buffer, client->buffer + client->parser_offset,
+            (client->buffer_offset -= client->parser_offset) + 1);
+    client->parser_offset = 0;
+}
+
+
 __attribute_hot__
 __attribute_nonnull__()
 static void
@@ -562,12 +575,8 @@ client_reset (Client * const restrict client, const int success)
             client->buffer_offset = 0;
         }
       #if 0
-        else if (client->parser_offset > (CLIENT_BUFFER_SIZE/2)) {
-            memmove(client->buffer, client->buffer+client->parser_offset,
-                    client->buffer_offset - client->parser_offset + 1);
-            client->buffer_offset -= client->parser_offset;
-            client->parser_offset = 0;
-        }
+        else if (client->parser_offset > (CLIENT_BUFFER_SIZE/2))
+            client_buffer_shift(client);
         /* future: if we tracked size of headers for first successful response,
          * we might use that size to determine whether or not to memmove()
          * any remaining contents in client->buffer to the beginning of buffer,
@@ -1073,12 +1082,8 @@ client_revents (Client * const restrict client)
 
         /* adjust client recv buffer if nearly full (e.g. pipelined responses)*/
         if (client->parser_offset
-            && __builtin_expect(
-                (sizeof(client->buffer) - client->buffer_offset < 1024), 0)) {
-            memmove(client->buffer, client->buffer + client->parser_offset,
-                    (client->buffer_offset -= client->parser_offset) + 1);
-            client->parser_offset = 0;
-        }
+            && sizeof(client->buffer) - client->buffer_offset < 1024)
+            client_buffer_shift(client);
 
         ssize_t r;
         do {
