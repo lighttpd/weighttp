@@ -29,13 +29,14 @@
 #include <inttypes.h>  /* PRIu64 PRId64 */
 #include <limits.h>    /* USHRT_MAX */
 #include <locale.h>    /* setlocale() */
+#include <math.h>      /* sqrt() */
 #include <netdb.h>     /* getaddrinfo() freeaddrinfo() */
 #include <poll.h>      /* poll() POLLIN POLLOUT POLLERR POLLHUP POLLRDHUP */
 #include <pthread.h>   /* pthread_create() pthread_join() */
 #include <stdarg.h>    /* va_start() va_end() vfprintf() */
 #include <stdio.h>
 #include <stdlib.h>    /* calloc() free() exit() strtoul() strtoull() */
-#include <stdint.h>    /* UINT32_MAX */
+#include <stdint.h>    /* INT32_MAX UINT32_MAX UINT64_MAX */
 #include <signal.h>    /* signal() */
 #include <string.h>
 #include <strings.h>   /* strcasecmp() strncasecmp() */
@@ -208,6 +209,8 @@ show_help (void)
 #define CLIENT_BUFFER_SIZE 32 * 1024
 
 
+struct Times;
+typedef struct Times Times;
 struct Stats;
 typedef struct Stats Stats;
 struct Client;
@@ -219,6 +222,12 @@ typedef struct Config Config;
 struct Worker_Config;
 typedef struct Worker_Config Worker_Config;
 
+
+struct Times {
+    uint32_t connect;    /* connect time (us) */
+    uint32_t ttfb;       /* time to first byte (us) */
+    uint64_t t;          /* response time (us) */ /* 64-bit align; overloaded */
+};
 
 struct Stats {
     uint64_t req_todo;      /* total num of requests to do */
@@ -269,6 +278,8 @@ struct Client {
     const char *request;
     struct pollfd *pfd;
     Stats *stats;
+    Times *times;
+    Times *wtimes;
     const struct addrinfo *raddr;
     const struct addrinfo *laddr;
     char buffer[CLIENT_BUFFER_SIZE+1];
@@ -285,6 +296,7 @@ struct Worker {
     struct addrinfo laddr;
     struct sockaddr_storage raddr_storage;
     struct sockaddr_storage laddr_storage;
+    Times *wtimes;
 };
 
 struct Worker_Config {
@@ -293,6 +305,7 @@ struct Worker_Config {
     int num_clients;
     uint64_t num_requests;
     Stats stats;
+    Times *wtimes;
     /* pad struct Worker_Config for cache line separation between threads.
      * Round up to 256 to avoid chance of false sharing between threads.
      * Alternatively, could memalign the allocation of struct Worker_Config
@@ -350,6 +363,7 @@ client_init (Worker * const restrict worker,
     client->parser_state = PARSER_CONNECT;
 
     client->stats = &worker->stats;
+    client->times = client->wtimes = worker->wtimes;
     client->raddr = &worker->raddr;
     client->laddr = config->laddrs.num > 0
                   ? config->laddrs.addrs[(i % config->laddrs.num)]
@@ -417,6 +431,15 @@ worker_init (Worker * const restrict worker,
     worker->stats.req_todo = wconf->num_requests;
     worker->pfds = (struct pollfd *)calloc(num_clients, sizeof(struct pollfd));
     worker->clients = (Client *)calloc(num_clients, sizeof(Client));
+
+    /*(note: if humongous benchmark, might mmap large file on disk rather than
+     * allocating on heap, but then would want to init .connect = INT32_MAX on
+     * demand for keepalive requests instead of pre-init here, and might mmap
+     * single file and give workers offsets instead of allocating per worker)*/
+    worker->wtimes = (Times *)calloc(wconf->num_requests, sizeof(Times));
+    for (uint64_t n = 0, total = wconf->num_requests; n < total; ++n)
+        worker->wtimes[n].connect = INT32_MAX;/*(initial value for keepalive)*/
+
     for (int i = 0; i < num_clients; ++i)
         client_init(worker, wconf->config, i);
 }
@@ -442,6 +465,7 @@ worker_delete (Worker * const restrict worker,
     }
 
     memcpy(&wconf->stats, &worker->stats, sizeof(Stats));
+    wconf->wtimes = worker->wtimes;
     for (i = 0; i < num_clients; ++i)
         client_delete(worker->clients+i);
     free(worker->clients);
@@ -550,11 +574,35 @@ client_buffer_shift (Client * const restrict client)
 }
 
 
+__attribute_noinline__
+static uint64_t
+client_gettime_uint64 (void)
+{
+    struct timeval tv;
+    gettimeofday(&tv, NULL);
+    /* encode struct timeval in 64 bits */
+    return ((uint64_t)tv.tv_sec << 20) | tv.tv_usec;
+}
+
+
+static uint32_t
+client_difftime (const uint64_t e, const uint64_t b)
+{
+    return (uint32_t)(((e >> 20) - (b >> 20)) * 1000000
+                      + ((e & 0xFFFFF) - (b & 0xFFFFF)));
+}
+
+
 __attribute_hot__
 __attribute_nonnull__()
 static void
 client_reset (Client * const restrict client, const int success)
 {
+    /* response time */
+    const uint64_t t = client_gettime_uint64();
+    Times * const restrict tstats = client->times;
+    tstats->t = (uint64_t)client_difftime(t, tstats->t);
+
     /* update worker stats */
     Stats * const restrict stats = client->stats;
     if (__builtin_expect( (!client->req_redo), 1)) {
@@ -568,7 +616,7 @@ client_reset (Client * const restrict client, const int success)
     client->revents = (stats->req_started < stats->req_todo) ? POLLOUT : 0;
     if (client->revents && client->keepalive) {
         /*(assumes writable; will find out soon if not and register interest)*/
-        ++stats->req_started;
+        client->times = client->wtimes + stats->req_started++;
         client->parser_state = PARSER_START;
         client->keptalive = 1;
         if (client->parser_offset == client->buffer_offset) {
@@ -588,6 +636,8 @@ client_reset (Client * const restrict client, const int success)
         if (--client->pipelined) {
             if (client->buffer_offset)
                 client->revents |= POLLIN;
+            /*(pipelined request; now about to wait for response)*/
+            client->times->t = t;
             /* note: may lower pipelining perf by delaying new request batch */
             if ((   client->pipeline_max > 4
                  && client->pipeline_max - 4 < client->pipelined)
@@ -668,6 +718,12 @@ client_connected (Client * const restrict client)
     /*client->success = 0;*/
 
     client->pfd->events |= POLLIN | POLLRDHUP;
+
+    Times * const restrict tstats = client->times;
+    const uint64_t t = client_gettime_uint64();
+    tstats->connect = client_difftime(t, tstats->t);
+    tstats->t = t; /* request sent time for initial request */
+    /*(assume writable socket ready for sending entire initial request)*/
 }
 
 
@@ -682,7 +738,7 @@ client_connect (Client * const restrict client)
 
     if (-1 == fd) {
         if (__builtin_expect( (!client->req_redo), 1))
-            ++client->stats->req_started;
+            client->times = client->wtimes + client->stats->req_started++;
         else
             client->req_redo = 0;
 
@@ -720,6 +776,9 @@ client_connect (Client * const restrict client)
         if (NULL != client->laddr
             && 0 != bind(fd, client->laddr->ai_addr, client->laddr->ai_addrlen))
             return client_perror(client, "bind() (local addr)");
+
+        /* connect() start time */
+        client->times->t = client_gettime_uint64();
 
         int rc;
       #ifdef TCP_FASTOPEN
@@ -1033,6 +1092,15 @@ client_parse (Client * const restrict client)
         else if (!client->chunked && -1 == client->content_length)
             client->keepalive = 0;
 
+        /* response time to first byte does not include connect() time for
+         * consistency with keep-alive and pipeline requests, even though
+         * traditional TTFB includes DNS resolution and connect() time.
+         * Also for simplicity, ttfb here includes time to receive complete
+         * response headers rather than first byte of headers or first byte
+         * of body (which might not have arrived yet) */
+        client->times->ttfb =
+          client_difftime(client_gettime_uint64(), client->times->t);
+
         __attribute_fallthrough__
 
       case PARSER_BODY:
@@ -1239,6 +1307,9 @@ client_revents (Client * const restrict client)
                     }
                     client->request_offset = 0;
                     client->pipelined += n;
+                    if (client->pipelined == n && client->keptalive)
+                        /*(update times; client->pipelined was 0)*/
+                        client->times->t = client_gettime_uint64();
                 }
             }
             else
@@ -1256,6 +1327,8 @@ client_revents (Client * const restrict client)
                 /* request sent */
                 client->request_offset = 0;
                 ++client->pipelined;
+                if (client->pipelined == 1 && client->keptalive)
+                    client->times->t = client_gettime_uint64();
                 if (client->pipelined < client->pipeline_max && ++x < 8
                     && client->stats->req_todo
                      - client->stats->req_started
@@ -2096,13 +2169,40 @@ weighttp_setup (Config * const restrict config, const int argc, char *argv[])
 }
 
 
+__attribute_pure__
+__attribute_nonnull__()
+static int
+sort_connect (const Times *a, const Times *b)
+{
+    return (int)((int64_t)a->connect - (int64_t)b->connect);
+}
+
+
+__attribute_pure__
+__attribute_nonnull__()
+static int
+sort_ttfb (const Times *a, const Times *b)
+{
+    return (int)((int64_t)a->ttfb - (int64_t)b->ttfb);
+}
+
+
+__attribute_pure__
+__attribute_nonnull__()
+static int
+sort_response (const Times *a, const Times *b)
+{
+    return (int)((int64_t)a->t - (int64_t)b->t);
+}
+
+
 __attribute_cold__
 __attribute_noinline__
 __attribute_nonnull__()
 static void
 weighttp_report (const Config * const restrict config)
 {
-    /* collect worker stats and release resources */
+    /* collect worker stats */
     Stats stats;
     memset(&stats, 0, sizeof(stats));
     for (int i = 0; i < config->thread_count; ++i) {
@@ -2120,6 +2220,166 @@ weighttp_report (const Config * const restrict config)
         stats.req_5xx       += wstats->req_5xx;
     }
 
+    if (0 == stats.req_done) {
+        fprintf(stderr, "error: request_count 0\n");
+        return;
+    }
+
+    /* collect worker times */
+    Times * const times = calloc(stats.req_done, sizeof(Times));
+    Times *wtimes = times;
+    for (int i = 0; i < config->thread_count; ++i) {
+        const Stats * const restrict wstats = &config->wconfs[i].stats;
+        memcpy(wtimes, config->wconfs[i].wtimes, wstats->req_done*sizeof(Times));
+        wtimes += wstats->req_done;
+        free(config->wconfs[i].wtimes);
+    }
+
+    typedef struct TimingStats {
+        uint64_t mean; /* mean */
+        uint64_t t0;   /* min */
+        uint64_t t50;  /* median */
+        uint64_t t66;
+        uint64_t t75;
+        uint64_t t80;
+        uint64_t t90;
+        uint64_t t95;
+        uint64_t t98;
+        uint64_t t99;
+        uint64_t t100; /* max */
+        double stddev; /* standard deviation */
+    } TimingStats;
+
+    TimingStats tc, ttfb, tr;
+    tc.mean = 0;
+    ttfb.mean = 0;
+    tr.mean = 0;
+    tc.t0 = UINT64_MAX;
+    ttfb.t0 = UINT64_MAX;
+    tr.t0 = UINT64_MAX;
+    tc.t100 = 0;
+    ttfb.t100 = 0;
+    tr.t100 = 0;
+    tc.stddev = 0.0;
+    ttfb.stddev = 0.0;
+    tr.stddev = 0.0;
+
+    qsort(times, stats.req_done, sizeof(Times),
+          (int(*)(const void *, const void *))sort_connect);
+    uint32_t connected = 0;
+    for (uint64_t i = 0; i < stats.req_done; ++i) {
+        Times *t = times+i;
+        if (t->connect == INT32_MAX) break; /* keepalive; not connect */
+        ++connected;
+        if (t->connect < tc.t0)   tc.t0   = t->connect;
+        if (t->connect > tc.t100) tc.t100 = t->connect;
+        tc.mean += t->connect;
+    }
+    tc.mean /= connected;
+    /* adjust median of num connected to 0-indexed array
+     * (more precise index for small number of connect()) */
+    tc.t50 = times[(connected / 2) - !(connected & 1)].connect;
+    tc.t66 = times[(connected * 66 / 100) - !(connected & 1)].connect;
+    tc.t75 = times[(connected * 75 / 100) - !(connected & 1)].connect;
+    tc.t80 = times[(connected * 80 / 100) - !(connected & 1)].connect;
+    tc.t90 = times[(connected * 90 / 100) - !(connected & 1)].connect;
+    tc.t95 = times[(connected * 95 / 100) - !(connected & 1)].connect;
+    tc.t98 = times[(connected * 98 / 100) - !(connected & 1)].connect;
+    tc.t99 = times[(connected * 99 / 100) - !(connected & 1)].connect;
+    for (uint32_t i = 0; i < connected; ++i) {
+        Times *t = times+i;
+        double d = (double)(int32_t)(t->connect - tc.mean);
+        tc.stddev += d * d;       /* sum of squares */
+    }
+    tc.stddev /= (connected - 1); /* variance */
+    tc.stddev = sqrt(tc.stddev);  /* standard deviation */
+
+    qsort(times, stats.req_done, sizeof(Times),
+          (int(*)(const void *, const void *))sort_ttfb);
+    for (uint64_t i = 0; i < stats.req_done; ++i) {
+        Times *t = times+i;
+        if (t->ttfb < ttfb.t0)   ttfb.t0   = t->ttfb;
+        if (t->ttfb > ttfb.t100) ttfb.t100 = t->ttfb;
+        ttfb.mean += t->ttfb;
+    }
+    ttfb.mean /= stats.req_done;
+    ttfb.t50 = times[(stats.req_done / 2) - !(stats.req_done & 1)].ttfb;
+    ttfb.t66 = times[(stats.req_done * 66 / 100)].ttfb;
+    ttfb.t75 = times[(stats.req_done * 75 / 100)].ttfb;
+    ttfb.t80 = times[(stats.req_done * 80 / 100)].ttfb;
+    ttfb.t90 = times[(stats.req_done * 90 / 100)].ttfb;
+    ttfb.t95 = times[(stats.req_done * 95 / 100)].ttfb;
+    ttfb.t98 = times[(stats.req_done * 98 / 100)].ttfb;
+    ttfb.t99 = times[(stats.req_done * 99 / 100)].ttfb;
+    for (uint64_t i = 0; i < stats.req_done; ++i) {
+        Times *t = times+i;
+        double d = (double)(int32_t)(t->ttfb - ttfb.mean);
+        ttfb.stddev += d * d;            /* sum of squares */
+    }
+    ttfb.stddev /= (stats.req_done - 1); /* variance */
+    ttfb.stddev = sqrt(ttfb.stddev);     /* standard deviation */
+
+    qsort(times, stats.req_done, sizeof(Times),
+          (int(*)(const void *, const void *))sort_response);
+    for (uint64_t i = 0; i < stats.req_done; ++i) {
+        Times *t = times+i;
+        if (t->t < tr.t0)   tr.t0   = t->t;
+        if (t->t > tr.t100) tr.t100 = t->t;
+        tr.mean += t->t;
+    }
+    tr.mean /= stats.req_done;
+    tr.t50 = times[(stats.req_done / 2) - !(stats.req_done & 1)].t;
+    tr.t66 = times[(stats.req_done * 66 / 100)].t;
+    tr.t75 = times[(stats.req_done * 75 / 100)].t;
+    tr.t80 = times[(stats.req_done * 80 / 100)].t;
+    tr.t90 = times[(stats.req_done * 90 / 100)].t;
+    tr.t95 = times[(stats.req_done * 95 / 100)].t;
+    tr.t98 = times[(stats.req_done * 98 / 100)].t;
+    tr.t99 = times[(stats.req_done * 99 / 100)].t;
+    for (uint64_t i = 0; i < stats.req_done; ++i) {
+        Times *t = times+i;
+        double d = (double)(int64_t)(t->t - tr.mean);
+        tr.stddev += d * d;            /* sum of squares */
+    }
+    tr.stddev /= (stats.req_done - 1); /* variance */
+    tr.stddev = sqrt(tr.stddev);       /* standard deviation */
+
+  #if 0 /*(might be useful to combine for tests without using keep-alive)*/
+    for (uint64_t i = 0; i < stats.req_done; ++i)
+        if (times[i].connect != INT32_MAX) times[i].t += times[i].connect;
+    TimingStats tot;
+    tot.mean = 0;
+    tot.t0 = UINT64_MAX;
+    tot.t100 = 0;
+    tot.stddev = 0.0;
+    qsort(times, stats.req_done, sizeof(Times),
+          (int(*)(const void *, const void *))sort_response);
+    for (uint64_t i = 0; i < stats.req_done; ++i) {
+        Times *t = times+i;
+        if (t->t < tot.t0)   tot.t0   = t->t;
+        if (t->t > tot.t100) tot.t100 = t->t;
+        tot.mean += t->t;
+    }
+    tot.mean /= stats.req_done;
+    tot.t50 = times[(stats.req_done / 2) - !(stats.req_done & 1)].t;
+    tot.t66 = times[(stats.req_done * 66 / 100)].t;
+    tot.t75 = times[(stats.req_done * 75 / 100)].t;
+    tot.t80 = times[(stats.req_done * 80 / 100)].t;
+    tot.t90 = times[(stats.req_done * 90 / 100)].t;
+    tot.t95 = times[(stats.req_done * 95 / 100)].t;
+    tot.t98 = times[(stats.req_done * 98 / 100)].t;
+    tot.t99 = times[(stats.req_done * 99 / 100)].t;
+    for (uint64_t i = 0; i < stats.req_done; ++i) {
+        Times *t = times+i;
+        double d = (double)(int64_t)(t->t - tot.mean);
+        tot.stddev += d * d;            /* sum of squares */
+    }
+    tot.stddev /= (stats.req_done - 1); /* variance */
+    tot.stddev = sqrt(tot.stddev);      /* standard deviation */
+  #endif
+
+    free(times);
+
     /* report cumulative stats */
     struct timeval tdiff;
     tdiff.tv_sec  = config->ts_end.tv_sec  - config->ts_start.tv_sec;
@@ -2131,6 +2391,9 @@ weighttp_report (const Config * const restrict config)
     const uint64_t total_usecs = tdiff.tv_sec * 1000000 + tdiff.tv_usec;
     const uint64_t rps = stats.req_done * 1000000 / total_usecs;
     const uint64_t kbps= stats.bytes_total / 1024 * 1000000 / total_usecs;
+    /*const uint64_t time_per_req = total_usecs / stats.req_done;*/
+    /* note: not currently tracking header/body bytes sent,
+     * and would have to track pipelined requests which were retried */
   #if 1  /* JSON-style formatted output */
     printf("{\n"
            "  \"reqs_per_sec\": %"PRIu64",\n"
@@ -2138,11 +2401,13 @@ weighttp_report (const Config * const restrict config)
            "  \"secs_elapsed\": %01d.%06ld,\n",
            rps, kbps, (int)tdiff.tv_sec, (long)tdiff.tv_usec);
     printf("  \"request_counts\": {\n"
-           "    \"started\": %"PRIu64",\n"
-           "    \"retired\": %"PRIu64",\n"
-           "    \"total\":   %"PRIu64"\n"
+           "    \"started\":    %"PRIu64",\n"
+           "    \"retired\":    %"PRIu64",\n"
+           "    \"total\":      %"PRIu64",\n"
+           "    \"keep-alive\": %"PRIu64"\n"
            "  },\n",
-           stats.req_started, stats.req_done, config->req_count);
+           stats.req_started, stats.req_done, config->req_count,
+           config->req_count - connected);
     printf("  \"response_counts\": {\n"
            "    \"pass\": %"PRIu64",\n"
            "    \"fail\": %"PRIu64",\n"
@@ -2160,10 +2425,90 @@ weighttp_report (const Config * const restrict config)
            "    \"bytes_total\":   %12.1"PRIu64",\n"
            "    \"bytes_headers\": %12.1"PRIu64",\n"
            "    \"bytes_body\":    %12.1"PRIu64"\n"
-           "  }\n"
-           "}\n",
+           "  },\n",
            stats.bytes_total, stats.bytes_headers,
            stats.bytes_total - stats.bytes_headers);
+    printf("  \"connect_times\": {\n"
+           "     \"num\": %9.1"PRIu32",\n"
+           "     \"avg\": %9.1"PRIu64",\n"
+           "     \"stddev\": %6.0f,\n"
+           "     \"unit\": \"us\",\n"
+           "      \"0%%\": %9.1"PRIu64",\n"
+           "     \"50%%\": %9.1"PRIu64",\n"
+           "     \"66%%\": %9.1"PRIu64",\n"
+           "     \"75%%\": %9.1"PRIu64",\n"
+           "     \"80%%\": %9.1"PRIu64",\n"
+           "     \"90%%\": %9.1"PRIu64",\n"
+           "     \"95%%\": %9.1"PRIu64",\n"
+           "     \"98%%\": %9.1"PRIu64",\n"
+           "     \"99%%\": %9.1"PRIu64",\n"
+           "    \"100%%\": %9.1"PRIu64"\n"
+           "  },\n",
+           connected, tc.mean, tc.stddev,
+           tc.t0,  tc.t50, tc.t66, tc.t75, tc.t80,
+           tc.t90, tc.t95, tc.t98, tc.t99, tc.t100);
+    printf("  \"time_to_first_byte\": {\n"
+           "     \"num\": %9.1"PRIu64",\n"
+           "     \"avg\": %9.1"PRIu64",\n"
+           "     \"stddev\": %6.0f,\n"
+           "     \"unit\": \"us\",\n"
+           "      \"0%%\": %9.1"PRIu64",\n"
+           "     \"50%%\": %9.1"PRIu64",\n"
+           "     \"66%%\": %9.1"PRIu64",\n"
+           "     \"75%%\": %9.1"PRIu64",\n"
+           "     \"80%%\": %9.1"PRIu64",\n"
+           "     \"90%%\": %9.1"PRIu64",\n"
+           "     \"95%%\": %9.1"PRIu64",\n"
+           "     \"98%%\": %9.1"PRIu64",\n"
+           "     \"99%%\": %9.1"PRIu64",\n"
+           "    \"100%%\": %9.1"PRIu64"\n"
+           "  },\n",
+           stats.req_done, ttfb.mean, ttfb.stddev,
+           ttfb.t0,  ttfb.t50, ttfb.t66, ttfb.t75, ttfb.t80,
+           ttfb.t90, ttfb.t95, ttfb.t98, ttfb.t99, ttfb.t100);
+    printf("  \"response_times\": {\n"
+           "     \"num\": %9.1"PRIu64",\n"
+           "     \"avg\": %9.1"PRIu64",\n"
+           "     \"stddev\": %6.0f,\n"
+           "     \"unit\": \"us\",\n"
+           "      \"0%%\": %9.1"PRIu64",\n"
+           "     \"50%%\": %9.1"PRIu64",\n"
+           "     \"66%%\": %9.1"PRIu64",\n"
+           "     \"75%%\": %9.1"PRIu64",\n"
+           "     \"80%%\": %9.1"PRIu64",\n"
+           "     \"90%%\": %9.1"PRIu64",\n"
+           "     \"95%%\": %9.1"PRIu64",\n"
+           "     \"98%%\": %9.1"PRIu64",\n"
+           "     \"99%%\": %9.1"PRIu64",\n"
+           "    \"100%%\": %9.1"PRIu64"\n"
+           "  }\n"
+           "}\n",
+           stats.req_done, tr.mean, tr.stddev,
+           tr.t0,  tr.t50, tr.t66, tr.t75, tr.t80,
+           tr.t90, tr.t95, tr.t98, tr.t99, tr.t100);
+   #if 0 /*(might be useful for tests without using keep-alive)*/
+         /*(note: if enabled, must adjust JSON in last two printf lines above)*/
+    printf("  \"total_times\": {\n"
+           "     \"num\": %9.1"PRIu64",\n"
+           "     \"avg\": %9.1"PRIu64",\n"
+           "     \"stddev\": %6.0f,\n"
+           "     \"unit\": \"us\",\n"
+           "      \"0%%\": %9.1"PRIu64",\n"
+           "     \"50%%\": %9.1"PRIu64",\n"
+           "     \"66%%\": %9.1"PRIu64",\n"
+           "     \"75%%\": %9.1"PRIu64",\n"
+           "     \"80%%\": %9.1"PRIu64",\n"
+           "     \"90%%\": %9.1"PRIu64",\n"
+           "     \"95%%\": %9.1"PRIu64",\n"
+           "     \"98%%\": %9.1"PRIu64",\n"
+           "     \"99%%\": %9.1"PRIu64",\n"
+           "    \"100%%\": %9.1"PRIu64"\n"
+           "  }\n"
+           "}\n",
+           stats.req_done, tot.mean, tot.stddev,
+           tot.t0,  tot.t50, tot.t66, tot.t75, tot.t80,
+           tot.t90, tot.t95, tot.t98, tot.t99, tot.t100);
+   #endif
   #else
     printf("\nfinished in %01d.%06ld sec, %"PRIu64" req/s, %"PRIu64" kbyte/s\n",
            (int)tdiff.tv_sec, (long)tdiff.tv_usec, rps, kbps);

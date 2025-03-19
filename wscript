@@ -58,6 +58,6 @@ def build(bld):
 		features = 'cc cprogram',
 		source = ['src/weighttp.c'],
 		defines = ['PACKAGE_VERSION="' + VERSION + '"'],
-		uselib = 'pthread',
+		uselib = 'pthread m',
 		target = 'weighttp'
 	)
