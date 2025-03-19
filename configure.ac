@@ -2,7 +2,7 @@
 # Process this file with autoconf to produce a configure script.
 
 AC_PREREQ([2.72])
-AC_INIT([weighttp],[0.4])
+AC_INIT([weighttp],[0.5])
 AC_CONFIG_SRCDIR([src/weighttp.c])
 AC_CONFIG_HEADERS([src/config.h])
 
