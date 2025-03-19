@@ -21,6 +21,7 @@
 
 #include <sys/types.h>
 #include <sys/socket.h>/* socket() connect() SOCK_NONBLOCK sockaddr_storage */
+                       /* recv() send() sendmmsg() */
 #include <sys/stat.h>  /* fstat() */
 #include <sys/time.h>  /* gettimeofday() */
 #include <errno.h>     /* errno EINTR EAGAIN EWOULDBLOCK EINPROGRESS EALREADY */
@@ -270,7 +271,7 @@ struct Client {
     Stats *stats;
     const struct addrinfo *raddr;
     const struct addrinfo *laddr;
-    char buffer[CLIENT_BUFFER_SIZE];
+    char buffer[CLIENT_BUFFER_SIZE+1];
 };
 
 struct Worker {
@@ -584,8 +585,18 @@ client_reset (Client * const restrict client, const int success)
          * On the size, if we expect to already have completed response fully
          * received in buffer, then skip the memmove(). */
       #endif
-        if (--client->pipelined && client->buffer_offset)
-            client->revents |= POLLIN;
+        if (--client->pipelined) {
+            if (client->buffer_offset)
+                client->revents |= POLLIN;
+            /* note: may lower pipelining perf by delaying new request batch */
+            if ((   client->pipeline_max > 4
+                 && client->pipeline_max - 4 < client->pipelined)
+                || stats->req_todo - stats->req_started
+                     == (uint64_t)client->pipelined) {
+                client->revents &= ~POLLOUT;
+                client->pfd->events &= ~POLLOUT;
+            }
+        }
     }
     else {
       #ifdef _WIN32
@@ -595,7 +606,7 @@ client_reset (Client * const restrict client, const int success)
       #endif
         client->pfd->fd = -1;
         client->pfd->events = 0;
-        /*client->pfd->revents = 0;*/
+        /*client->pfd->revents = 0;*//*(POLLOUT set above if more req_todo)*/
         client->parser_state = PARSER_CONNECT;
     }
 }
@@ -1075,10 +1086,15 @@ __attribute_nonnull__()
 static void
 client_revents (Client * const restrict client)
 {
+    int x = 0;
+
     while (client->revents & (POLLIN|POLLRDHUP)) {
         /* parse pipelined responses */
         if (client->buffer_offset && !client_parse(client))
             continue;
+
+        if (++x > 2 && !(client->revents & POLLRDHUP))
+            break;
 
         /* adjust client recv buffer if nearly full (e.g. pipelined responses)*/
         if (client->parser_offset
@@ -1140,6 +1156,8 @@ client_revents (Client * const restrict client)
         client_reset(client, 0);
     }
 
+    x = 0;
+
     while (client->revents & POLLOUT) {
         ssize_t r;
         if (client->parser_state == PARSER_CONNECT && !client_connect(client))
@@ -1170,18 +1188,78 @@ client_revents (Client * const restrict client)
         }
         if (-1 == r) /*(fall through to write())*/
       #endif
-        do {
-            r = send(client->pfd->fd,
-                     client->request+client->request_offset,
-                     client->request_size - client->request_offset,
-                     MSG_DONTWAIT | MSG_NOSIGNAL);
-        } while (__builtin_expect( (-1 == r), 0) && errno == EINTR);
+        {
+          #ifndef HAVE_SENDMMSG
+          #ifdef __GLIBC__
+          #define HAVE_SENDMMSG 1
+          #endif
+          #endif
+
+          #if HAVE_SENDMMSG
+            /* Attempt to batch requests in fewer syscalls by using sendmmsg().
+             * pipelining may increase raw requests per second, but also
+             * increases worst response latency due in part to weighttp being
+             * busy, and that pipelined requests must be resent after server
+             * closes keep-alive. */
+            int n = client->pipeline_max - client->pipelined;
+            uint64_t nmax = client->stats->req_todo
+                          - client->stats->req_started
+                          - client->pipelined;
+            if ((uint64_t)n > nmax)
+                n = (int)nmax;
+            if (n > 1) {
+                if (n > 8) n = 8;
+                struct iovec iov[8];
+                for (int i = 0; i < n; ++i) {
+                    *(const void **)&iov[i].iov_base = client->request;
+                    iov[i].iov_len = client->request_size;
+                }
+                iov[0].iov_base = (char *)iov[0].iov_base
+                                + client->request_offset;
+                iov[0].iov_len -= client->request_offset;
+                struct mmsghdr msg;
+                memset(&msg, 0, sizeof(msg));
+                msg.msg_hdr.msg_iov = iov;
+                msg.msg_hdr.msg_iovlen = n;
+                do {
+                    r = sendmmsg(client->pfd->fd, &msg, 1,
+                                 MSG_DONTWAIT | MSG_NOSIGNAL);
+                } while (__builtin_expect( (-1 == r), 0) && errno == EINTR);
+                if (1 == r
+                    && (size_t)(r = (ssize_t)msg.msg_len) > iov[0].iov_len) {
+                    /* multiple requests sent; handle all but last one */
+                    n = 1;
+                    if ((r -= (ssize_t)iov[0].iov_len) > client->request_size) {
+                        n += r / client->request_size;
+                        r %= client->request_size;
+                        if (0 == r) { /* leave last request for below */
+                            --n;
+                            r = client->request_size;
+                        }
+                    }
+                    client->request_offset = 0;
+                    client->pipelined += n;
+                }
+            }
+            else
+          #endif
+            do {
+                r = send(client->pfd->fd,
+                         client->request+client->request_offset,
+                         client->request_size - client->request_offset,
+                         MSG_DONTWAIT | MSG_NOSIGNAL);
+            } while (__builtin_expect( (-1 == r), 0) && errno == EINTR);
+        }
         if (__builtin_expect( (r > 0), 1)) {
             if (client->request_size == (uint32_t)r
                 || client->request_size==(client->request_offset+=(uint32_t)r)){
                 /* request sent */
                 client->request_offset = 0;
-                if (++client->pipelined < client->pipeline_max)
+                ++client->pipelined;
+                if (client->pipelined < client->pipeline_max && ++x < 8
+                    && client->stats->req_todo
+                     - client->stats->req_started
+                     - client->pipelined)
                     continue;
                 else {
                     client->revents &= ~POLLOUT; /*(trigger write() loop exit)*/
@@ -1206,7 +1284,7 @@ client_revents (Client * const restrict client)
                     break;
                 }
                 else
-                    client_perror(client, "write()");
+                    client_perror(client, "send()");
             }
             else { /* (0 == r); not expected; not attempting to write 0 bytes */
                 client->keepalive = 0;
