@@ -749,13 +749,15 @@ client_connect (Client * const restrict client)
             return client_perror(client, "socket()");
 
       #if !SOCK_NONBLOCK
-        fcntl(fd, F_SETFL, O_NONBLOCK | O_RDWR); /* set non-blocking */
+        if (0 != fcntl(fd, F_SETFL, O_NONBLOCK | O_RDWR)) /* set non-blocking */
+            client_perror(client, "fcntl() O_NONBLOCK");
       #endif
         client->pfd->fd = fd;
 
         if (raddr->ai_family != AF_UNIX) {
             opt = 1;
-            setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &opt, sizeof(opt));
+            if (0 != setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &opt,sizeof(opt)))
+                client_perror(client, "setsockopt() TCP_NODELAY");
         }
 
         if (0 != client->so_bufsz) {
@@ -1963,6 +1965,9 @@ config_request (Config * const restrict config,
         if (reqsz != config->request_size)
             config_perror("read(%s)", params->body_filename);
     }
+
+    if (-1 != fd)
+        close(fd);
 }
 
 
@@ -2289,10 +2294,11 @@ weighttp_report (const Config * const restrict config)
     for (uint32_t i = 0; i < connected; ++i) {
         Times *t = times+i;
         double d = (double)(int32_t)(t->connect - tc.mean);
-        tc.stddev += d * d;       /* sum of squares */
+        tc.stddev += d * d;           /* sum of squares */
     }
-    tc.stddev /= (connected - 1); /* variance */
-    tc.stddev = sqrt(tc.stddev);  /* standard deviation */
+    if (connected > 1)
+        tc.stddev /= (connected - 1); /* variance */
+    tc.stddev = sqrt(tc.stddev);      /* standard deviation */
 
     qsort(times, stats.req_done, sizeof(Times),
           (int(*)(const void *, const void *))sort_ttfb);
@@ -2314,10 +2320,11 @@ weighttp_report (const Config * const restrict config)
     for (uint64_t i = 0; i < stats.req_done; ++i) {
         Times *t = times+i;
         double d = (double)(int32_t)(t->ttfb - ttfb.mean);
-        ttfb.stddev += d * d;            /* sum of squares */
+        ttfb.stddev += d * d;                /* sum of squares */
     }
-    ttfb.stddev /= (stats.req_done - 1); /* variance */
-    ttfb.stddev = sqrt(ttfb.stddev);     /* standard deviation */
+    if (stats.req_done > 1)
+        ttfb.stddev /= (stats.req_done - 1); /* variance */
+    ttfb.stddev = sqrt(ttfb.stddev);         /* standard deviation */
 
     qsort(times, stats.req_done, sizeof(Times),
           (int(*)(const void *, const void *))sort_response);
@@ -2339,10 +2346,11 @@ weighttp_report (const Config * const restrict config)
     for (uint64_t i = 0; i < stats.req_done; ++i) {
         Times *t = times+i;
         double d = (double)(int64_t)(t->t - tr.mean);
-        tr.stddev += d * d;            /* sum of squares */
+        tr.stddev += d * d;                /* sum of squares */
     }
-    tr.stddev /= (stats.req_done - 1); /* variance */
-    tr.stddev = sqrt(tr.stddev);       /* standard deviation */
+    if (stats.req_done > 1)
+        tr.stddev /= (stats.req_done - 1); /* variance */
+    tr.stddev = sqrt(tr.stddev);           /* standard deviation */
 
   #if 0 /*(might be useful to combine for tests without using keep-alive)*/
     for (uint64_t i = 0; i < stats.req_done; ++i)
@@ -2372,10 +2380,11 @@ weighttp_report (const Config * const restrict config)
     for (uint64_t i = 0; i < stats.req_done; ++i) {
         Times *t = times+i;
         double d = (double)(int64_t)(t->t - tot.mean);
-        tot.stddev += d * d;            /* sum of squares */
+        tot.stddev += d * d;                /* sum of squares */
     }
-    tot.stddev /= (stats.req_done - 1); /* variance */
-    tot.stddev = sqrt(tot.stddev);      /* standard deviation */
+    if (stats.req_done > 1)
+        tot.stddev /= (stats.req_done - 1); /* variance */
+    tot.stddev = sqrt(tot.stddev);          /* standard deviation */
   #endif
 
     free(times);
