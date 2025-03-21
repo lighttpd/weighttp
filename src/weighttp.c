@@ -191,7 +191,7 @@ show_help (void)
       "  -X proxy   proxy:port or unix domain socket path beginning w/ '/'\n"
       "  -p file    make HTTP POST request using file contents for body\n"
       "  -u file    make HTTP PUT request using file contents for body\n"
-      "  -d         (ignored; compatibility with Apache Bench (ab))\n"
+      "  -d         do not report extended percentiles (beyond min,mean,max)\n"
       "  -l         (ignored; compatibility with Apache Bench (ab))\n"
       "  -r         (ignored; compatibility with Apache Bench (ab))\n"
       "  -q         quiet: do not show version header or progress\n"
@@ -341,6 +341,7 @@ struct Config {
     int so_bufsz;
 
     int quiet;
+    int report_extended_percentiles;
   #ifdef WEIGHTTP_SPLICE
     int reqpipe;
   #endif
@@ -2001,6 +2002,7 @@ weighttp_setup (Config * const restrict config, const int argc, char *argv[])
     config->http_head = 0;
     config->so_bufsz = 0;
     config->quiet = 0;
+    config->report_extended_percentiles = 1;
 
     setlocale(LC_ALL, "C");
     signal(SIGPIPE, SIG_IGN);
@@ -2073,6 +2075,8 @@ weighttp_setup (Config * const restrict config, const int argc, char *argv[])
             config->quiet = 1;
             break;
           case 'd':
+            config->report_extended_percentiles = 0;
+            break;
           case 'l':
           case 'r':
             /*(ignored; compatibility with Apache Bench (ab))*/
@@ -2451,58 +2455,67 @@ weighttp_report (const Config * const restrict config)
            "     \"stddev\": %6.0f,\n"
            "     \"unit\": \"us\",\n"
            "      \"0%%\": %9.1"PRIu64",\n"
-           "     \"50%%\": %9.1"PRIu64",\n"
+           "     \"50%%\": %9.1"PRIu64",\n",
+           connected, tc.mean, tc.stddev, tc.t0, tc.t50);
+    if (config->report_extended_percentiles)
+        printf(
            "     \"66%%\": %9.1"PRIu64",\n"
            "     \"75%%\": %9.1"PRIu64",\n"
            "     \"80%%\": %9.1"PRIu64",\n"
            "     \"90%%\": %9.1"PRIu64",\n"
            "     \"95%%\": %9.1"PRIu64",\n"
            "     \"98%%\": %9.1"PRIu64",\n"
-           "     \"99%%\": %9.1"PRIu64",\n"
+           "     \"99%%\": %9.1"PRIu64",\n",
+           tc.t66, tc.t75, tc.t80, tc.t90, tc.t95, tc.t98, tc.t99);
+    printf(
            "    \"100%%\": %9.1"PRIu64"\n"
            "  },\n",
-           connected, tc.mean, tc.stddev,
-           tc.t0,  tc.t50, tc.t66, tc.t75, tc.t80,
-           tc.t90, tc.t95, tc.t98, tc.t99, tc.t100);
+           tc.t100);
     printf("  \"time_to_first_byte\": {\n"
            "     \"num\": %9.1"PRIu64",\n"
            "     \"avg\": %9.1"PRIu64",\n"
            "     \"stddev\": %6.0f,\n"
            "     \"unit\": \"us\",\n"
            "      \"0%%\": %9.1"PRIu64",\n"
-           "     \"50%%\": %9.1"PRIu64",\n"
+           "     \"50%%\": %9.1"PRIu64",\n",
+           stats.req_done, ttfb.mean, ttfb.stddev, ttfb.t0, ttfb.t50);
+    if (config->report_extended_percentiles)
+        printf(
            "     \"66%%\": %9.1"PRIu64",\n"
            "     \"75%%\": %9.1"PRIu64",\n"
            "     \"80%%\": %9.1"PRIu64",\n"
            "     \"90%%\": %9.1"PRIu64",\n"
            "     \"95%%\": %9.1"PRIu64",\n"
            "     \"98%%\": %9.1"PRIu64",\n"
-           "     \"99%%\": %9.1"PRIu64",\n"
+           "     \"99%%\": %9.1"PRIu64",\n",
+           ttfb.t66, ttfb.t75, ttfb.t80, ttfb.t90, ttfb.t95, ttfb.t98,ttfb.t99);
+    printf(
            "    \"100%%\": %9.1"PRIu64"\n"
            "  },\n",
-           stats.req_done, ttfb.mean, ttfb.stddev,
-           ttfb.t0,  ttfb.t50, ttfb.t66, ttfb.t75, ttfb.t80,
-           ttfb.t90, ttfb.t95, ttfb.t98, ttfb.t99, ttfb.t100);
+           ttfb.t100);
     printf("  \"response_times\": {\n"
            "     \"num\": %9.1"PRIu64",\n"
            "     \"avg\": %9.1"PRIu64",\n"
            "     \"stddev\": %6.0f,\n"
            "     \"unit\": \"us\",\n"
            "      \"0%%\": %9.1"PRIu64",\n"
-           "     \"50%%\": %9.1"PRIu64",\n"
+           "     \"50%%\": %9.1"PRIu64",\n",
+           stats.req_done, tr.mean, tr.stddev, tr.t0, tr.t50);
+    if (config->report_extended_percentiles)
+        printf(
            "     \"66%%\": %9.1"PRIu64",\n"
            "     \"75%%\": %9.1"PRIu64",\n"
            "     \"80%%\": %9.1"PRIu64",\n"
            "     \"90%%\": %9.1"PRIu64",\n"
            "     \"95%%\": %9.1"PRIu64",\n"
            "     \"98%%\": %9.1"PRIu64",\n"
-           "     \"99%%\": %9.1"PRIu64",\n"
+           "     \"99%%\": %9.1"PRIu64",\n",
+           tr.t66, tr.t75, tr.t80, tr.t90, tr.t95, tr.t98, tr.t99);
+    printf(
            "    \"100%%\": %9.1"PRIu64"\n"
            "  }\n"
            "}\n",
-           stats.req_done, tr.mean, tr.stddev,
-           tr.t0,  tr.t50, tr.t66, tr.t75, tr.t80,
-           tr.t90, tr.t95, tr.t98, tr.t99, tr.t100);
+           tr.t100);
    #if 0 /*(might be useful for tests without using keep-alive)*/
          /*(note: if enabled, must adjust JSON in last two printf lines above)*/
     printf("  \"total_times\": {\n"
@@ -2511,20 +2524,23 @@ weighttp_report (const Config * const restrict config)
            "     \"stddev\": %6.0f,\n"
            "     \"unit\": \"us\",\n"
            "      \"0%%\": %9.1"PRIu64",\n"
-           "     \"50%%\": %9.1"PRIu64",\n"
+           "     \"50%%\": %9.1"PRIu64",\n",
+           stats.req_done, tot.mean, tot.stddev, tot.t0, tot.t50);
+    if (config->report_extended_percentiles)
+        printf(
            "     \"66%%\": %9.1"PRIu64",\n"
            "     \"75%%\": %9.1"PRIu64",\n"
            "     \"80%%\": %9.1"PRIu64",\n"
            "     \"90%%\": %9.1"PRIu64",\n"
            "     \"95%%\": %9.1"PRIu64",\n"
            "     \"98%%\": %9.1"PRIu64",\n"
-           "     \"99%%\": %9.1"PRIu64",\n"
+           "     \"99%%\": %9.1"PRIu64",\n",
+           tot.t66, tot.t75, tot.t80, tot.t90, tot.t95, tot.t98, tot.t99);
+    printf(
            "    \"100%%\": %9.1"PRIu64"\n"
            "  }\n"
            "}\n",
-           stats.req_done, tot.mean, tot.stddev,
-           tot.t0,  tot.t50, tot.t66, tot.t75, tot.t80,
-           tot.t90, tot.t95, tot.t98, tot.t99, tot.t100);
+           tot.t100);
    #endif
   #else
     printf("\nfinished in %01d.%06ld sec, %"PRIu64" req/s, %"PRIu64" kbyte/s\n",
