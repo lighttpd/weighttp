@@ -1,12 +1,10 @@
-.waf-*
 .deps/
-.lock-wscript
 .DS_Store
 *.[oa]
 *.l[oa]
 *.exe
 *~
-*build
+build/
 weighttp
 Makefile
 Makefile.in

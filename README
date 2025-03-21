@@ -31,24 +31,6 @@ $ make install
 or
 $ sudo make install
 
-BUILD (waf)
-=====
-
-Make sure you have python installed, then:
-
-$ ./waf configure
-$ ./waf build
-
-See ./waf --help for available configure options and other commands available.
-
-
-INSTALL (waf)
-=======
-
-$ ./waf install
-or
-$ sudo ./waf install
-
 
 USAGE
 =====
