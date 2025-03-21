@@ -1,7 +1,7 @@
 /*
- * weighttp - a lightweight and simple webserver benchmarking tool
+ * weighttp - lightweight and simple webserver benchmarking tool
  *
- * Copyright (c) 2016, Glue Logic LLC. All rights reserved. code()gluelogic.com
+ * Copyright (c) 2016,2025 Glue Logic LLC. All rights reserved. code()gluelogic.com
  *
  * This rewrite is based on weighttp by Thomas Porzelt
  *     Copyright (c) 2009-2011 Thomas Porzelt
@@ -151,7 +151,7 @@ static void
 show_version (void)
 {
     puts("\nweighttp " PACKAGE_VERSION
-         " - a lightweight and simple webserver benchmarking tool\n");
+         " - lightweight and simple webserver benchmarking tool\n");
 }
 
 
