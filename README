@@ -3,13 +3,13 @@ weighttp - lightweight and simple webserver benchmarking tool
 
 This rewrite is based on weighttp by Thomas Porzelt
   git://git.lighttpd.net/weighttp
-  https://github.com/lighttpd/weighttp/
+  https://git.lighttpd.net/lighttpd/weighttp/
 
 Contact code () gluelogic . com with comments or suggestions.
 
 ---------------------------------------------------------------
 
-Please see http://weighttp.lighttpd.net/ for current info.
+Please see http://weighttp.lighttpd.net/wiki for current info.
 
 BUILD (autobuild)
 =====
@@ -17,19 +17,19 @@ BUILD (autobuild)
 When running from git (should not be necessary when building from tar),
 requires automake, autoconf and friends:
 
-$ ./autogen.sh
+./autogen.sh
+./configure
+make
+#sudo make install
 
-Then:
 
-$ ./configure
-$ make
+BUILD (meson)
+=====
 
-INSTALL (autobuild)
-=======
-
-$ make install
-or
-$ sudo make install
+meson setup --prefix /usr/local build
+cd build
+meson compile
+#sudo meson install
 
 
 USAGE

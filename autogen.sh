@@ -4,8 +4,8 @@
 set -e
 
 if [ ! -f configure.ac -o ! -f COPYING ]; then
-	echo "Doesn't look like you're in the source directory" >&2
-	exit 1
+    echo "Doesn't look like you're in the source directory" >&2
+    exit 1
 fi
 
 autoreconf --force --install
