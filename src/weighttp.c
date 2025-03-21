@@ -193,6 +193,7 @@ show_help (void)
       "  -u file    make HTTP PUT request using file contents for body\n"
       "  -d         do not report extended percentiles (beyond min,mean,max)\n"
       "  -l         (ignored; compatibility with Apache Bench (ab))\n"
+      "  -e file    output CSV file with percentages for total time to serve\n"
       "  -r         (ignored; compatibility with Apache Bench (ab))\n"
       "  -q         quiet: do not show version header or progress\n"
       "  -h         show help and exit\n"
@@ -356,6 +357,7 @@ struct Config {
         struct addrinfo **addrs;
         int num;
     } laddrs;
+    const char *csv_filename;
 };
 
 
@@ -1990,6 +1992,7 @@ weighttp_setup (Config * const restrict config, const int argc, char *argv[])
     int opt_show_version = 0;
     config_params params;
     memset(&params, 0, sizeof(params));
+    memset(config, 0, sizeof(Config));
 
     /* default settings */
     config->thread_count = 1;
@@ -2007,7 +2010,7 @@ weighttp_setup (Config * const restrict config, const int argc, char *argv[])
     setlocale(LC_ALL, "C");
     signal(SIGPIPE, SIG_IGN);
 
-    const char * const optstr = ":hVikqdlr6Fm:n:t:c:b:p:u:A:B:C:H:K:P:T:X:";
+    const char * const optstr = ":hVikqdlr6Fm:n:t:c:b:e:p:u:A:B:C:H:K:P:T:X:";
     int opt;
     while (-1 != (opt = getopt(argc, argv, optstr))) {
         switch (opt) {
@@ -2078,6 +2081,11 @@ weighttp_setup (Config * const restrict config, const int argc, char *argv[])
             config->report_extended_percentiles = 0;
             break;
           case 'l':
+            /*(ignored; compatibility with Apache Bench (ab))*/
+            break;
+          case 'e':
+            config->csv_filename = optarg;
+            break;
           case 'r':
             /*(ignored; compatibility with Apache Bench (ab))*/
             break;
@@ -2364,7 +2372,6 @@ weighttp_report (const Config * const restrict config)
         tr.stddev /= (stats.req_done - 1); /* variance */
     tr.stddev = sqrt(tr.stddev);           /* standard deviation */
 
-  #if 0 /*(might be useful to combine for tests without using keep-alive)*/
     for (uint64_t i = 0; i < stats.req_done; ++i)
         if (times[i].connect != INT32_MAX) times[i].t += times[i].connect;
     TimingStats tot;
@@ -2381,6 +2388,7 @@ weighttp_report (const Config * const restrict config)
         tot.mean += t->t;
     }
     tot.mean /= stats.req_done;
+  #if 0 /*(might be useful to combine for tests without using keep-alive)*/
     tot.t50 = times[(stats.req_done / 2) - !(stats.req_done & 1)].t;
     tot.t66 = times[(stats.req_done * 66 / 100)].t;
     tot.t75 = times[(stats.req_done * 75 / 100)].t;
@@ -2398,6 +2406,27 @@ weighttp_report (const Config * const restrict config)
         tot.stddev /= (stats.req_done - 1); /* variance */
     tot.stddev = sqrt(tot.stddev);          /* standard deviation */
   #endif
+
+    if (config->csv_filename) {
+        FILE *CSV_FILE = stdout;
+        if (0 != strcmp(config->csv_filename, "-")) {
+            CSV_FILE = fopen(config->csv_filename, "w");
+            if (NULL == CSV_FILE) {
+                perror(config->csv_filename);
+                CSV_FILE = fopen("/dev/null", "w");
+                if (NULL == CSV_FILE)
+                    CSV_FILE = stdout;
+            }
+        }
+        fprintf(CSV_FILE, "Percentage served,Time in us\n"
+                          "0,%"PRIu64"\n", tot.t0);
+        for (uint32_t i = 1; i < 100; ++i)
+            fprintf(CSV_FILE, "%d,%"PRIu64"\n", i,
+                    times[(stats.req_done * i / 100)].t);
+        fprintf(CSV_FILE, "100,%"PRIu64"\n", tot.t100);
+        if (0 != strcmp(config->csv_filename, "-"))
+            fclose(CSV_FILE);
+    }
 
     free(times);
 
