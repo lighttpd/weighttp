@@ -12,6 +12,14 @@
  *     MIT, see COPYING file
  */
 
+#ifndef __has_include
+#define __has_include(x) 0
+#endif
+
+#if __has_include("config.h")
+#include "config.h"
+#endif
+
 #ifndef _GNU_SOURCE
 #define _GNU_SOURCE 1
 #endif
