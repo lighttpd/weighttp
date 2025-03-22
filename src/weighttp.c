@@ -2388,7 +2388,6 @@ weighttp_report (const Config * const restrict config)
         tot.mean += t->t;
     }
     tot.mean /= stats.req_done;
-  #if 0 /*(might be useful to combine for tests without using keep-alive)*/
     tot.t50 = times[(stats.req_done / 2) - !(stats.req_done & 1)].t;
     tot.t66 = times[(stats.req_done * 66 / 100)].t;
     tot.t75 = times[(stats.req_done * 75 / 100)].t;
@@ -2405,7 +2404,6 @@ weighttp_report (const Config * const restrict config)
     if (stats.req_done > 1)
         tot.stddev /= (stats.req_done - 1); /* variance */
     tot.stddev = sqrt(tot.stddev);          /* standard deviation */
-  #endif
 
     if (config->csv_filename) {
         FILE *CSV_FILE = stdout;
@@ -2542,11 +2540,8 @@ weighttp_report (const Config * const restrict config)
            tr.t66, tr.t75, tr.t80, tr.t90, tr.t95, tr.t98, tr.t99);
     printf(
            "    \"100%%\": %9.1"PRIu64"\n"
-           "  }\n"
-           "}\n",
+           "  },\n",
            tr.t100);
-   #if 0 /*(might be useful for tests without using keep-alive)*/
-         /*(note: if enabled, must adjust JSON in last two printf lines above)*/
     printf("  \"total_times\": {\n"
            "     \"num\": %9.1"PRIu64",\n"
            "     \"avg\": %9.1"PRIu64",\n"
@@ -2570,7 +2565,6 @@ weighttp_report (const Config * const restrict config)
            "  }\n"
            "}\n",
            tot.t100);
-   #endif
   #else
     printf("\nfinished in %01d.%06ld sec, %"PRIu64" req/s, %"PRIu64" kbyte/s\n",
            (int)tdiff.tv_sec, (long)tdiff.tv_usec, rps, kbps);
