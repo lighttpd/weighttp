@@ -343,6 +343,7 @@ struct Config {
 
     int quiet;
     int report_extended_percentiles;
+    int stddev_confidence;
   #ifdef WEIGHTTP_SPLICE
     int reqpipe;
   #endif
@@ -2006,11 +2007,12 @@ weighttp_setup (Config * const restrict config, const int argc, char *argv[])
     config->so_bufsz = 0;
     config->quiet = 0;
     config->report_extended_percentiles = 1;
+    config->stddev_confidence = 1;
 
     setlocale(LC_ALL, "C");
     signal(SIGPIPE, SIG_IGN);
 
-    const char * const optstr = ":hVikqdlr6Fm:n:t:c:b:e:p:u:A:B:C:H:K:P:T:X:";
+    const char * const optstr = ":hVikqdlr6FSm:n:t:c:b:e:p:u:A:B:C:H:K:P:T:X:";
     int opt;
     while (-1 != (opt = getopt(argc, argv, optstr))) {
         switch (opt) {
@@ -2043,6 +2045,9 @@ weighttp_setup (Config * const restrict config, const int argc, char *argv[])
             break;
           case 'P':
             params.proxy_authorization = optarg;
+            break;
+          case 'S':
+            config->stddev_confidence = 0;
             break;
           case 'T':
             params.body_content_type = optarg;
@@ -2221,6 +2226,42 @@ sort_response (const Times *a, const Times *b)
 }
 
 
+typedef struct TimingStats {
+    uint64_t mean; /* mean */
+    uint64_t t0;   /* min */
+    uint64_t t50;  /* median */
+    uint64_t t66;
+    uint64_t t75;
+    uint64_t t80;
+    uint64_t t90;
+    uint64_t t95;
+    uint64_t t98;
+    uint64_t t99;
+    uint64_t t100; /* max */
+    double stddev; /* standard deviation */
+} TimingStats;
+
+
+__attribute_nonnull__()
+static void
+weighttp_stddev_sanity (const TimingStats * const restrict t, const char *tag)
+{
+    if (t->stddev < 1.0) return; /*(i.e. 0 us)*/
+    double d = (double)(t->mean > t->t50 ? t->mean - t->t50 : t->t50 - t->mean);
+    if (d <= t->stddev) return;
+    if (d > 2 * t->stddev)
+        fprintf(stderr,
+          "ERROR: %s median and mean differ by > 2 standard deviations.\n"
+          "These results are unreliable; be cautious drawing conclusions.\n",
+          tag);
+    else
+        fprintf(stderr,
+          "WARNING: %s median and mean differ by > 1 standard deviation.\n"
+          "These results may be unreliable; be cautious drawing conclusions.\n",
+          tag);
+}
+
+
 __attribute_cold__
 __attribute_noinline__
 __attribute_nonnull__()
@@ -2259,21 +2300,6 @@ weighttp_report (const Config * const restrict config)
         wtimes += wstats->req_done;
         free(config->wconfs[i].wtimes);
     }
-
-    typedef struct TimingStats {
-        uint64_t mean; /* mean */
-        uint64_t t0;   /* min */
-        uint64_t t50;  /* median */
-        uint64_t t66;
-        uint64_t t75;
-        uint64_t t80;
-        uint64_t t90;
-        uint64_t t95;
-        uint64_t t98;
-        uint64_t t99;
-        uint64_t t100; /* max */
-        double stddev; /* standard deviation */
-    } TimingStats;
 
     TimingStats tc, ttfb, tr;
     tc.mean = 0;
@@ -2565,6 +2591,14 @@ weighttp_report (const Config * const restrict config)
            "  }\n"
            "}\n",
            tot.t100);
+
+    if (config->stddev_confidence) {
+        weighttp_stddev_sanity(&tc,   "connect time");
+        weighttp_stddev_sanity(&ttfb, "time to first byte");
+        weighttp_stddev_sanity(&tr,   "response time");
+        weighttp_stddev_sanity(&tot,  "total time");
+    }
+
   #else
     printf("\nfinished in %01d.%06ld sec, %"PRIu64" req/s, %"PRIu64" kbyte/s\n",
            (int)tdiff.tv_sec, (long)tdiff.tv_usec, rps, kbps);
