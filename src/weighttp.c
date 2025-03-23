@@ -2477,11 +2477,15 @@ weighttp_report (const Config * const restrict config)
     printf("  \"request_counts\": {\n"
            "    \"started\":    %"PRIu64",\n"
            "    \"retired\":    %"PRIu64",\n"
-           "    \"total\":      %"PRIu64",\n"
            "    \"keep-alive\": %"PRIu64"\n"
            "  },\n",
-           stats.req_started, stats.req_done, config->req_count,
-           config->req_count - connected);
+           stats.req_started, stats.req_done,
+           /* stats.req_started - connected - connect_fail*//*(not counted)*/
+           stats.req_done - connected  /*(keep-alive retired; approx)*/
+             - (stats.req_failed - stats.req_4xx - stats.req_5xx));
+             /*(accurate if stats.req_failed == 0, else approx;
+              * connect fail, no response, incomplete header, and
+              * could be double-counted if connected req got 4xx or 5xx)*/
     printf("  \"response_counts\": {\n"
            "    \"pass\": %"PRIu64",\n"
            "    \"fail\": %"PRIu64",\n"
