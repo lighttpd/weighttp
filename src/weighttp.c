@@ -1012,6 +1012,8 @@ client_parse (Client * const restrict client)
         client->content_length = -1;
         client->chunked = 0;
         client->http_status_success = 1;
+        if (client->buffer[client->parser_offset + sizeof("HTTP/1.")-1] == '0')
+            client->keepalive = 0;
         switch (client->buffer[client->parser_offset + sizeof("HTTP/1.1 ")-1]
                 - '0') {
           case 2:
@@ -1048,6 +1050,10 @@ client_parse (Client * const restrict client)
         client->stats->bytes_headers += len;
         client->parser_offset += len;
         client->parser_state = PARSER_HEADER;
+
+        if (end[1] == '\r' && end[2] == '\n')
+            goto parsed_header;
+            /* blank line; end of headers; not expected; expect at least Date */
 
         __attribute_fallthrough__
 
@@ -1097,6 +1103,8 @@ client_parse (Client * const restrict client)
                     ++str;
                 if ((*str | 0x20) == 'c')  /*(assume "close")*/
                     client->keepalive = 0;
+                /*(not looking for Connection: keep-alive; instead server should
+                 * use HTTP/1.1, not HTTP/1.0 with Connection: keep-alive)*/
             }
             else if (str[17] == ':'
                      && (0 == memcmp(str, "Transfer-Encoding",
@@ -1110,14 +1118,20 @@ client_parse (Client * const restrict client)
 
         } while (end[1] != '\r' || end[2] != '\n');
 
+      parsed_header: /* goto */
+
         /* body reached */
         client->stats->bytes_headers += 2;
         client->parser_offset += 2;
         client->parser_state = PARSER_BODY;
         if (client->http_head)
             client->content_length = 0;
-        else if (!client->chunked && -1 == client->content_length)
-            client->keepalive = 0;
+        else if (!client->chunked && -1 == client->content_length) {
+            if (client->keepalive)
+                client->content_length = 0;
+            else
+                client->keepalive = 0;
+        }
 
         /* response time to first byte does not include connect() time for
          * consistency with keep-alive and pipeline requests, even though
