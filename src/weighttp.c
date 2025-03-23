@@ -1028,6 +1028,19 @@ client_parse (Client * const restrict client)
             client->http_status_success = 0;
             ++client->stats->req_5xx;
             break;
+          case 1:
+            /* read and discard HTTP/1.x 1xx intermediate responses */
+            end = strstr(end-1, "\r\n\r\n");
+            if (NULL == end) return 1;
+            len = (uint32_t)(end - client->buffer - client->parser_offset + 4);
+            client->stats->bytes_headers += len;
+            client->parser_offset += len;
+            if (client->parser_offset == client->buffer_offset) {
+                client->buffer_offset = 0;
+                client->parser_offset = 0;
+                return 1;
+            }
+            return client_parse(client); /* tail recursive */
           default:
             /* invalid status code */
             return client_error(client);
