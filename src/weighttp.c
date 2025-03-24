@@ -2410,8 +2410,10 @@ weighttp_report (const Config * const restrict config)
         if (t->connect > tc.t100) tc.t100 = t->connect;
         tc.mean += t->connect;
     }
-    if (!connected)
-        tc.t0 = 0;
+    if (!connected) {
+        memset(&tc, 0, sizeof(tc));
+        tc.stddev = 0.0;
+    }
     else {
         tc.mean /= connected;
         /* adjust median of num connected to 0-indexed array
