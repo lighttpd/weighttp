@@ -45,7 +45,7 @@
 #include <stdio.h>
 #include <stdlib.h>    /* calloc() free() exit() strtoul() strtoull() */
 #include <stdint.h>    /* INT32_MAX UINT32_MAX UINT64_MAX */
-#include <signal.h>    /* signal() */
+#include <signal.h>    /* signal() pthread_sigmask() */
 #include <string.h>
 #include <strings.h>   /* strcasecmp() strncasecmp() */
 #include <unistd.h>    /* read() write() close() getopt() optarg optind optopt*/
@@ -202,6 +202,17 @@ show_help (void)
       "  weighttpd -n 500000 -c 100 -t 2 -K 64 http://localhost/index.html\n");
 }
 
+
+static volatile sig_atomic_t signalled;
+
+static void
+signal_handler (int sig)
+{
+    (void)sig;
+    if (++signalled > 1) exit(-1); /*(e.g. exit if multiple Ctrl-C received)*/
+}
+
+
 /* Notes regarding pipelining
  * Enabling pipelining (-p x where x > 1) results in extra requests being sent
  * beyond the precise number requested on the command line.  Subsequently,
@@ -344,6 +355,7 @@ struct Config {
     int quiet;
     int report_extended_percentiles;
     int stddev_confidence;
+    unsigned int alarm;
   #ifdef WEIGHTTP_SPLICE
     int reqpipe;
   #endif
@@ -457,6 +469,12 @@ worker_init (Worker * const restrict worker,
 }
 
 
+__attribute_hot__
+__attribute_nonnull__()
+static void
+client_reset (Client * const restrict client, const int success);
+
+
 __attribute_cold__
 __attribute_nonnull__()
 __attribute_noinline__
@@ -466,6 +484,32 @@ worker_delete (Worker * const restrict worker,
 {
     int i;
     const int num_clients = wconf->num_clients;
+
+    if (signalled) {
+        uint64_t aborted = 0;
+        for (i = 0; i < num_clients; ++i) {
+            Client * const restrict client = worker->clients + i;
+            if (client->parser_state != PARSER_CONNECT) {
+                client->times->ttfb = INT32_MAX; /* flag aborted */
+                client_reset(client, 0);
+                ++aborted;
+            }
+        }
+        /* swap Times for aborted requests to end of list and do not count.
+         * note: also removes stats for hung connections not yet timed out */
+        Times * const wtimes = worker->wtimes;
+        uint64_t w = worker->stats.req_done - 1;
+        for (uint64_t u = 0, v = worker->stats.req_done; u < v; ++u) {
+            if (wtimes[u].ttfb == INT32_MAX) {
+                while (wtimes[w].ttfb == INT32_MAX && w) --w;
+                if (u >= w) break;
+                wtimes[u] = wtimes[w];
+                wtimes[w].ttfb = INT32_MAX;
+            }
+        }
+        worker->stats.req_failed -= aborted;
+        worker->stats.req_done -= aborted;
+    }
 
     /* adjust bytes_total to discard count of excess responses
      * (> worker->stats.req_todo) */
@@ -626,7 +670,8 @@ client_reset (Client * const restrict client, const int success)
     }
 
     client->revents = (stats->req_started < stats->req_todo) ? POLLOUT : 0;
-    if (client->revents && client->keepalive) {
+    if (client->revents && client->keepalive
+        && __builtin_expect( (!signalled), 1)) {
         /*(assumes writable; will find out soon if not and register interest)*/
         client->times = client->wtimes + stats->req_started++;
         client->parser_state = PARSER_START;
@@ -1267,6 +1312,9 @@ client_revents (Client * const restrict client)
 
     x = 0;
 
+    if (__builtin_expect( (signalled), 0))
+        return;
+
     while (client->revents & POLLOUT) {
         ssize_t r;
         if (client->parser_state == PARSER_CONNECT && !client_connect(client))
@@ -1433,7 +1481,10 @@ worker_thread (void * const arg)
         }
     }
 
-    while (worker.stats.req_done < worker.stats.req_todo) {
+    while (worker.stats.req_done < worker.stats.req_todo
+           && __builtin_expect( (!signalled), 1)) {
+        /*(small window between signalled check and poll(),
+         * but expect poll() to return with ready fds in short order)*/
         do {                                 /*(infinite wait)*/
             nready = poll(worker.pfds, (nfds_t)num_clients, -1);
         } while (__builtin_expect( (-1 == nready), 0) && errno == EINTR);
@@ -2035,11 +2086,14 @@ weighttp_setup (Config * const restrict config, const int argc, char *argv[])
     config->quiet = 0;
     config->report_extended_percentiles = 1;
     config->stddev_confidence = 1;
+    config->alarm = 0;
 
     setlocale(LC_ALL, "C");
     signal(SIGPIPE, SIG_IGN);
+    signal(SIGINT, signal_handler);
+    signal(SIGALRM, signal_handler);
 
-    const char * const optstr = ":hVikqdlr6FSm:n:t:c:b:e:p:u:A:B:C:H:K:P:T:X:";
+    const char * const optstr = ":hVikqdlr6FSa:m:n:t:c:b:e:p:u:A:B:C:H:K:P:T:X:";
     int opt;
     while (-1 != (opt = getopt(argc, argv, optstr))) {
         switch (opt) {
@@ -2081,6 +2135,9 @@ weighttp_setup (Config * const restrict config, const int argc, char *argv[])
             break;
           case 'X':
             config->proxy = optarg;
+            break;
+          case 'a':
+            config->alarm = (unsigned int)strtoul(optarg, NULL, 10);
             break;
           case 'b':
             config->so_bufsz = (int)strtoul(optarg, NULL, 10);
@@ -2666,6 +2723,15 @@ int main (int argc, char *argv[])
       (pthread_t *)calloc(config.thread_count, sizeof(pthread_t));
   #endif
 
+    sigset_t sigs;
+    sigemptyset(&sigs);
+    sigaddset(&sigs, SIGINT);
+    sigaddset(&sigs, SIGALRM);
+    pthread_sigmask(SIG_BLOCK, &sigs, NULL);
+
+    if (config.alarm)
+        alarm(config.alarm);
+
     if (!config.quiet)
         puts("starting benchmark...");
     gettimeofday(&config.ts_start, NULL);
@@ -2679,6 +2745,8 @@ int main (int argc, char *argv[])
             return 2; /* (unexpected) fatal error */
         }
     }
+
+    pthread_sigmask(SIG_UNBLOCK, &sigs, NULL);
 
     for (int i = 0; i < config.thread_count; ++i) {
         int err = pthread_join(threads[i], NULL);
