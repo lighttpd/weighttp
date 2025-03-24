@@ -1040,8 +1040,7 @@ client_parse (Client * const restrict client)
     switch (client->parser_state) {
 
       case PARSER_START:
-        /* look for HTTP/1.1 200 OK (though also accept HTTP/1.0 200)
-         * Note: does not support 1xx intermediate messages */
+        /* look for HTTP/1.1 200 OK (though also accept HTTP/1.0 200) */
         /* Note: not validating response line; assume valid */
         /*end = strchr(client->buffer+client->parser_offset, '\n');*/
         end = memchr(client->buffer+client->parser_offset, '\n',
