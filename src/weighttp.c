@@ -2353,25 +2353,29 @@ weighttp_report (const Config * const restrict config)
         if (t->connect > tc.t100) tc.t100 = t->connect;
         tc.mean += t->connect;
     }
-    tc.mean /= connected;
-    /* adjust median of num connected to 0-indexed array
-     * (more precise index for small number of connect()) */
-    tc.t50 = times[(connected / 2) - !(connected & 1)].connect;
-    tc.t66 = times[(connected * 66 / 100) - !(connected & 1)].connect;
-    tc.t75 = times[(connected * 75 / 100) - !(connected & 1)].connect;
-    tc.t80 = times[(connected * 80 / 100) - !(connected & 1)].connect;
-    tc.t90 = times[(connected * 90 / 100) - !(connected & 1)].connect;
-    tc.t95 = times[(connected * 95 / 100) - !(connected & 1)].connect;
-    tc.t98 = times[(connected * 98 / 100) - !(connected & 1)].connect;
-    tc.t99 = times[(connected * 99 / 100) - !(connected & 1)].connect;
-    for (uint32_t i = 0; i < connected; ++i) {
-        Times *t = times+i;
-        double d = (double)(int32_t)(t->connect - tc.mean);
-        tc.stddev += d * d;           /* sum of squares */
+    if (!connected)
+        tc.t0 = 0;
+    else {
+        tc.mean /= connected;
+        /* adjust median of num connected to 0-indexed array
+         * (more precise index for small number of connect()) */
+        tc.t50 = times[(connected / 2) - !(connected & 1)].connect;
+        tc.t66 = times[(connected * 66 / 100) - !(connected & 1)].connect;
+        tc.t75 = times[(connected * 75 / 100) - !(connected & 1)].connect;
+        tc.t80 = times[(connected * 80 / 100) - !(connected & 1)].connect;
+        tc.t90 = times[(connected * 90 / 100) - !(connected & 1)].connect;
+        tc.t95 = times[(connected * 95 / 100) - !(connected & 1)].connect;
+        tc.t98 = times[(connected * 98 / 100) - !(connected & 1)].connect;
+        tc.t99 = times[(connected * 99 / 100) - !(connected & 1)].connect;
+        for (uint32_t i = 0; i < connected; ++i) {
+            Times *t = times+i;
+            double d = (double)(int32_t)(t->connect - tc.mean);
+            tc.stddev += d * d;           /* sum of squares */
+        }
+        if (connected > 1)
+            tc.stddev /= (connected - 1); /* variance */
+        tc.stddev = sqrt(tc.stddev);      /* standard deviation */
     }
-    if (connected > 1)
-        tc.stddev /= (connected - 1); /* variance */
-    tc.stddev = sqrt(tc.stddev);      /* standard deviation */
 
     qsort(times, stats.req_done, sizeof(Times),
           (int(*)(const void *, const void *))sort_ttfb);
