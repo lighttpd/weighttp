@@ -1,7 +1,6 @@
 TODO
 ----
 
-- timeouts, time limits (or early termination via Ctrl-C)
 - TLS support
 - HTTP/2 client support
 

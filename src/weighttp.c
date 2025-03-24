@@ -356,6 +356,7 @@ struct Config {
     int report_extended_percentiles;
     int stddev_confidence;
     unsigned int alarm;
+    uint32_t cutoff;
   #ifdef WEIGHTTP_SPLICE
     int reqpipe;
   #endif
@@ -506,12 +507,17 @@ worker_delete (Worker * const restrict worker,
 
     if (signalled) {
         uint64_t aborted = 0;
+        const uint64_t t = client_gettime_uint64();
+        const uint32_t cutoff = wconf->config->cutoff * 1000000;
         for (i = 0; i < num_clients; ++i) {
             Client * const restrict client = worker->clients + i;
-            if (client->parser_state != PARSER_CONNECT) {
-                client->times->ttfb = INT32_MAX; /* flag aborted */
+            if (client->pfd->fd >= 0) {
+                /*heuristic to separate aborted connections from hung (failed)*/
+                if (client_difftime(t, client->times->t) < cutoff) {
+                    client->times->ttfb = INT32_MAX; /* flag aborted */
+                    ++aborted;
+                }
                 client_reset(client, 0);
-                ++aborted;
             }
         }
         /* swap Times for aborted requests to end of list and do not count.
@@ -527,7 +533,10 @@ worker_delete (Worker * const restrict worker,
             }
         }
         worker->stats.req_failed -= aborted;
-        worker->stats.req_done -= aborted;
+        worker->stats.req_started-= aborted;
+        worker->stats.req_done   -= aborted;
+        /* client->times is assigned when req_started is incremented */
+        /* req_started and req_done end up the same after all client_reset() */
     }
 
     /* adjust bytes_total to discard count of excess responses
@@ -674,6 +683,10 @@ client_reset (Client * const restrict client, const int success)
         && __builtin_expect( (!signalled), 1)) {
         /*(assumes writable; will find out soon if not and register interest)*/
         client->times = client->wtimes + stats->req_started++;
+        /* init time for use by worker_delete() in case benchmark ends abruptly
+         * (if pipelined request, now about to wait for response)
+         * (if not pipelined request, time will be updated after request sent)*/
+        client->times->t = t;
         client->parser_state = PARSER_START;
         client->keptalive = 1;
         if (client->parser_offset == client->buffer_offset) {
@@ -693,8 +706,6 @@ client_reset (Client * const restrict client, const int success)
         if (--client->pipelined) {
             if (client->buffer_offset)
                 client->revents |= POLLIN;
-            /*(pipelined request; now about to wait for response)*/
-            client->times->t = t;
             /* note: may lower pipelining perf by delaying new request batch */
             if ((   client->pipeline_max > 4
                  && client->pipeline_max - 4 < client->pipelined)
@@ -2086,13 +2097,15 @@ weighttp_setup (Config * const restrict config, const int argc, char *argv[])
     config->report_extended_percentiles = 1;
     config->stddev_confidence = 1;
     config->alarm = 0;
+    config->cutoff = 4; /* 4 seconds */
 
     setlocale(LC_ALL, "C");
     signal(SIGPIPE, SIG_IGN);
     signal(SIGINT, signal_handler);
     signal(SIGALRM, signal_handler);
 
-    const char * const optstr = ":hVikqdlr6FSa:m:n:t:c:b:e:p:u:A:B:C:H:K:P:T:X:";
+    const char * const optstr =
+      ":hVikqdlr6FSa:m:n:t:c:b:e:p:s:u:A:B:C:H:K:P:T:X:";
     int opt;
     while (-1 != (opt = getopt(argc, argv, optstr))) {
         switch (opt) {
@@ -2176,6 +2189,11 @@ weighttp_setup (Config * const restrict config, const int argc, char *argv[])
             break;
           case 'r':
             /*(ignored; compatibility with Apache Bench (ab))*/
+            break;
+          case 's':
+            config->cutoff = (uint32_t)strtoul(optarg, NULL, 10);
+            if (config->req_count == 0)
+                config->req_count = 50000;
             break;
           case 't':
             config->thread_count = (int)strtoul(optarg, NULL, 10);
