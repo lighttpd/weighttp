@@ -374,6 +374,25 @@ struct Config {
 };
 
 
+__attribute_noinline__
+static uint64_t
+client_gettime_uint64 (void)
+{
+    struct timeval tv;
+    gettimeofday(&tv, NULL);
+    /* encode struct timeval in 64 bits */
+    return ((uint64_t)tv.tv_sec << 20) | tv.tv_usec;
+}
+
+
+static uint32_t
+client_difftime (const uint64_t e, const uint64_t b)
+{
+    return (uint32_t)(((e >> 20) - (b >> 20)) * 1000000
+                      + ((e & 0xFFFFF) - (b & 0xFFFFF)));
+}
+
+
 __attribute_cold__
 __attribute_nonnull__()
 static void
@@ -627,25 +646,6 @@ client_buffer_shift (Client * const restrict client)
     memmove(client->buffer, client->buffer + client->parser_offset,
             (client->buffer_offset -= client->parser_offset) + 1);
     client->parser_offset = 0;
-}
-
-
-__attribute_noinline__
-static uint64_t
-client_gettime_uint64 (void)
-{
-    struct timeval tv;
-    gettimeofday(&tv, NULL);
-    /* encode struct timeval in 64 bits */
-    return ((uint64_t)tv.tv_sec << 20) | tv.tv_usec;
-}
-
-
-static uint32_t
-client_difftime (const uint64_t e, const uint64_t b)
-{
-    return (uint32_t)(((e >> 20) - (b >> 20)) * 1000000
-                      + ((e & 0xFFFFF) - (b & 0xFFFFF)));
 }
 
 
