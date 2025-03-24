@@ -192,14 +192,17 @@ show_help (void)
       "  -p file    make HTTP POST request using file contents for body\n"
       "  -u file    make HTTP PUT request using file contents for body\n"
       "  -d         do not report extended percentiles (beyond min,mean,max)\n"
+      "  -S         do not show standard deviation confidence warnings\n"
       "  -l         (ignored; compatibility with Apache Bench (ab))\n"
       "  -e file    output CSV file with percentages for total time to serve\n"
       "  -r         (ignored; compatibility with Apache Bench (ab))\n"
+      "  -a time    max seconds to run benchmark (or until -n requests)\n"
+      "  -s cutoff  seconds to cutoff fails (default: 4)\n"
       "  -q         quiet: do not show version header or progress\n"
       "  -h         show help and exit\n"
       "  -V         show version and exit\n\n"
       "example: \n"
-      "  weighttpd -n 500000 -c 100 -t 2 -K 64 http://localhost/index.html\n");
+      "  weighttp -n 500000 -c 100 -t 2 -K 64 http://localhost/index.html\n");
 }
 
 
