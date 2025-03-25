@@ -2308,6 +2308,7 @@ __attribute_nonnull__()
 static int
 sort_connect (const Times *a, const Times *b)
 {
+    /*(cmp shortcut ok; input expected to be two smallish uint32_t)*/
     return (int)((int64_t)a->connect - (int64_t)b->connect);
 }
 
@@ -2317,6 +2318,7 @@ __attribute_nonnull__()
 static int
 sort_ttfb (const Times *a, const Times *b)
 {
+    /*(cmp shortcut ok; input expected to be two smallish uint32_t)*/
     return (int)((int64_t)a->ttfb - (int64_t)b->ttfb);
 }
 
@@ -2326,6 +2328,7 @@ __attribute_nonnull__()
 static int
 sort_response (const Times *a, const Times *b)
 {
+    /*(cmp shortcut ok; input expected to be two smallish uint64_t)*/
     return (int)((int64_t)a->t - (int64_t)b->t);
 }
 
