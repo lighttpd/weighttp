@@ -536,10 +536,10 @@ worker_delete (Worker * const restrict worker,
             }
         }
         worker->stats.req_failed -= aborted;
-        worker->stats.req_started-= aborted;
         worker->stats.req_done   -= aborted;
         /* client->times is assigned when req_started is incremented */
-        /* req_started and req_done end up the same after all client_reset() */
+        /* req_started and req_done end up the same after all client_reset(),
+         * except for the abandoned (aborted) adjustment */
     }
 
     /* adjust bytes_total to discard count of excess responses
